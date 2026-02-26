@@ -188,6 +188,26 @@ function validateProperties(game, properties) {
 }
 
 /**
+ * Check config for values that commonly cause lag. Returns array of hint strings.
+ */
+function getConfigLagHints(game, config, ram) {
+  if (!config || game !== 'minecraft') return [];
+
+  const hints = [];
+  const vd = parseInt(config['view-distance'], 10);
+  const sd = parseInt(config['simulation-distance'], 10);
+
+  if (!isNaN(vd) && vd > 12) {
+    hints.push(`**View distance** is ${vd} — values above 10–12 often cause lag. The standard is 10 chunks. Consider reducing with: \`modify ewa view-distance 10\`.`);
+  }
+  if (!isNaN(sd) && sd > 12) {
+    hints.push(`**Simulation distance** is ${sd} — consider reducing to 10 or lower for better performance.`);
+  }
+
+  return hints;
+}
+
+/**
  * Match log text against known error patterns for a game.
  * Returns array of { pattern, diagnosis, fix } for each match.
  */
@@ -226,6 +246,7 @@ module.exports = {
   validateConfigValue,
   validateProperties,
   diagnoseFromLogs,
+  getConfigLagHints,
   configSummaryForPrompt,
   envKeyToPropertyKey,
   propertyKeyToEnvKey,

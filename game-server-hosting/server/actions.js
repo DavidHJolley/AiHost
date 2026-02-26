@@ -419,21 +419,30 @@ const executors = {
     const serverDir = path.join(ctx.serversPath, server.id);
     const config = readServerProperties(serverDir);
 
-    const patternMatches = templates.diagnoseFromLogs(server.game, logs);
+    let patternMatches = templates.diagnoseFromLogs(server.game, logs);
+    const configLagHints = templates.getConfigLagHints(server.game, config, server.ram);
 
-    if (patternMatches.length > 0) {
-      const lines = patternMatches.map(
-        (m) => `**Issue:** ${m.diagnosis}\n  **Fix:** ${m.fix}`
+    if (configLagHints.length > 0) {
+      patternMatches = patternMatches.filter(
+        (m) => !/shutting down|Stopping the server/i.test(m.diagnosis)
       );
+    }
+
+    const parts = [`**Diagnosis for ${server.name}:**`, ''];
+    if (patternMatches.length > 0) {
+      parts.push(...patternMatches.map((m) => `**Issue:** ${m.diagnosis}\n  **Fix:** ${m.fix}`), '');
+    }
+    if (configLagHints.length > 0) {
+      parts.push('**Likely lag causes:**', '', ...configLagHints, '');
+    }
+    if (config) {
+      parts.push(`Current: RAM ${server.ram}, max-players: ${config['max-players'] || '?'}, view-distance: ${config['view-distance'] || '?'}`);
+    }
+
+    if (patternMatches.length > 0 || configLagHints.length > 0) {
       return {
         success: true,
-        reply: [
-          `**Diagnosis for ${server.name}:**`,
-          '',
-          ...lines,
-          '',
-          config ? `Current RAM: ${server.ram}, max-players: ${config['max-players'] || '?'}, view-distance: ${config['view-distance'] || '?'}` : '',
-        ].join('\n'),
+        reply: parts.join('\n'),
         server,
         logs: logs.slice(-2000),
         issues: patternMatches,
