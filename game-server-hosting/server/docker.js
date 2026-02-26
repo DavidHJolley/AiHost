@@ -204,6 +204,62 @@ async function findContainerByServerId(serverId) {
   );
 }
 
+// ─── Execute command via RCON ────────────────────────────────────────────────
+
+async function execCommand(containerId, command) {
+  const container = docker.getContainer(containerId);
+  const exec = await container.exec({
+    Cmd: ['rcon-cli', command],
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+
+  return new Promise((resolve, reject) => {
+    exec.start({}, (err, stream) => {
+      if (err) return reject(err);
+      let output = '';
+      stream.on('data', (chunk) => { output += chunk.toString('utf8'); });
+      stream.on('end', () => {
+        resolve(
+          output.split('\n')
+            .map(l => (l.length > 8 ? l.slice(8) : l))
+            .join('\n')
+            .trim()
+        );
+      });
+      stream.on('error', reject);
+    });
+  });
+}
+
+// ─── Stream container logs in real-time ──────────────────────────────────────
+
+async function streamContainerLogs(containerId, onData) {
+  const container = docker.getContainer(containerId);
+  const logStream = await container.logs({
+    stdout: true,
+    stderr: true,
+    follow: true,
+    tail: 200,
+    timestamps: false,
+  });
+
+  let buffer = '';
+  logStream.on('data', (chunk) => {
+    buffer += chunk.toString('utf8');
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const cleaned = line.length > 8 ? line.slice(8) : line;
+      if (cleaned.trim()) onData(cleaned);
+    }
+  });
+
+  return {
+    destroy() { try { logStream.destroy(); } catch {} },
+  };
+}
+
 module.exports = {
   createContainer,
   startContainer,
@@ -213,4 +269,6 @@ module.exports = {
   getContainerLogs,
   findContainerByServerId,
   containerName,
+  execCommand,
+  streamContainerLogs,
 };

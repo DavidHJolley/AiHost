@@ -3,97 +3,278 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🎮 Game Server Hosting</title>
+  <title>GameHost — AI-Powered Server Hosting</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="app">
 
-    <!-- ── Header ─────────────────────────────────────────── -->
-    <header class="header">
-      <span class="header-logo">🎮</span>
-      <h1>Game Server Hosting</h1>
-      <span class="header-tag">AI-Powered</span>
-    </header>
+    <!-- ═══ Sidebar ═══════════════════════════════════════════════════════ -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon">⬡</span>
+        <span class="brand-text">GameHost</span>
+        <span class="brand-badge">AI</span>
+      </div>
 
-    <main class="main">
+      <nav class="sidebar-menu">
+        <div class="nav-label">MENU</div>
+        <button class="nav-item active" data-view="servers" id="nav-servers">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
+          <span>My Servers</span>
+        </button>
+        <button class="nav-item" data-view="ai" id="nav-ai">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><path d="M10 21v1h4v-1"/></svg>
+          <span>AI Assistant</span>
+        </button>
+      </nav>
 
-      <!-- ── Left column: Chat ──────────────────────────────── -->
-      <section class="panel chat-panel">
-        <div class="panel-title">
-          <span>💬</span> AI Assistant
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section" id="sidebar-server-section" style="display:none">
+        <div class="nav-label">SERVER</div>
+        <button class="nav-tab active" data-tab="overview">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span>Overview</span>
+        </button>
+        <button class="nav-tab" data-tab="console">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <span>Console</span>
+        </button>
+        <button class="nav-tab" data-tab="files">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>Files</span>
+        </button>
+        <button class="nav-tab" data-tab="players">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Players</span>
+        </button>
+        <div class="sidebar-divider"></div>
+      </div>
+
+      <div class="sidebar-servers">
+        <div class="nav-label">YOUR SERVERS</div>
+        <div id="sidebar-servers-list"></div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="btn btn-primary btn-block" id="btn-new-server">+ New Server</button>
+      </div>
+    </aside>
+
+    <!-- ═══ Main ══════════════════════════════════════════════════════════ -->
+    <main class="main-area">
+
+      <!-- Topbar (server detail header) -->
+      <header class="topbar" id="topbar" style="display:none">
+        <div class="topbar-left">
+          <button class="topbar-back" id="btn-back" title="Back to servers">&larr;</button>
+          <h2 class="topbar-name" id="topbar-name"></h2>
+          <span class="badge badge-game" id="topbar-game">Minecraft</span>
+          <span class="badge" id="topbar-status"></span>
+          <span class="topbar-meta" id="topbar-players"></span>
         </div>
+        <div class="topbar-right">
+          <button class="btn btn-success-outline btn-sm" id="btn-start">▶ Start</button>
+          <button class="btn btn-accent btn-sm" id="btn-restart">↻ Restart</button>
+          <button class="btn btn-danger-outline btn-sm" id="btn-stop">⏹ Stop</button>
+          <button class="btn btn-ghost btn-sm btn-danger-text" id="btn-delete" title="Delete server">🗑</button>
+        </div>
+      </header>
 
-        <!-- Chat history -->
-        <div class="chat-history" id="chat-history">
-          <div class="chat-message assistant">
-            <span class="chat-avatar">🤖</span>
-            <div class="chat-bubble">
-              Hi! I'm your AI game server manager.<br/>
-              Try: <em>"Create a Minecraft server with 4GB RAM called Survival"</em>
+      <!-- Content -->
+      <div class="content">
+
+        <!-- ─── Server list view ─────────────────────────────────── -->
+        <div class="view" id="view-servers">
+          <div class="view-header">
+            <h2>My Servers</h2>
+            <button class="btn btn-primary btn-sm" id="btn-new-server-2">+ New Server</button>
+          </div>
+          <div class="server-grid" id="server-grid">
+            <div class="empty-state" id="empty-state">
+              <div class="empty-icon">🎮</div>
+              <h3>No servers yet</h3>
+              <p>Create your first game server to get started</p>
             </div>
           </div>
         </div>
 
-        <!-- Input row -->
-        <div class="chat-input-row">
-          <input
-            type="text"
-            id="chat-input"
-            class="chat-input"
-            placeholder='Create a Minecraft server with 4GB RAM…'
-            autocomplete="off"
-          />
-          <button id="chat-send" class="btn btn-primary">Send</button>
-        </div>
-      </section>
-
-      <!-- ── Right column: Server list ─────────────────────── -->
-      <section class="panel servers-panel">
-        <div class="panel-title">
-          <span>🖥️</span> Your Servers
-          <button class="btn btn-sm btn-ghost" id="refresh-btn" title="Refresh">⟳</button>
-        </div>
-
-        <div id="server-list" class="server-list">
-          <div class="empty-state" id="empty-state">
-            No servers yet.<br/>Use the chat to create one!
+        <!-- ─── AI Assistant view ────────────────────────────────── -->
+        <div class="view hidden" id="view-ai">
+          <div class="chat-container">
+            <div class="chat-messages" id="chat-history">
+              <div class="chat-msg assistant">
+                <div class="chat-avatar">🤖</div>
+                <div class="chat-bubble">
+                  Hi! I'm your AI game server manager.<br>
+                  Try: <em>"Create a Minecraft server with 4GB RAM called Survival"</em>
+                </div>
+              </div>
+            </div>
+            <div class="chat-input-area">
+              <input type="text" id="chat-input" placeholder="Ask me to create, manage, or configure servers..." autocomplete="off" />
+              <button class="btn btn-primary" id="chat-send">Send</button>
+            </div>
           </div>
         </div>
-      </section>
 
+        <!-- ─── Server detail view ───────────────────────────────── -->
+        <div class="view hidden" id="view-detail">
+
+          <!-- Overview tab -->
+          <div class="tab-pane" id="tab-overview">
+            <div class="overview-grid">
+              <div class="card info-card">
+                <div class="info-card-top">
+                  <span class="info-card-icon" id="overview-game-icon">⛏️</span>
+                  <div>
+                    <div class="info-card-game" id="overview-game">Minecraft</div>
+                    <span class="badge" id="overview-status">ONLINE</span>
+                  </div>
+                </div>
+                <div class="info-rows">
+                  <div class="info-row"><span>Server Name</span><span id="overview-name">—</span></div>
+                  <div class="info-row"><span>Players</span><span id="overview-players">—</span></div>
+                  <div class="info-row"><span>Port</span><span id="overview-port">—</span></div>
+                  <div class="info-row"><span>RAM</span><span id="overview-ram">—</span></div>
+                  <div class="info-row"><span>Server Type</span><span id="overview-type">—</span></div>
+                  <div class="info-row"><span>IP Address</span><span id="overview-ip">—</span></div>
+                </div>
+              </div>
+
+              <div class="card console-card">
+                <div class="card-header">
+                  <span>Console</span>
+                  <button class="btn btn-ghost btn-xs" id="btn-goto-console">Full Server Log →</button>
+                </div>
+                <div class="console-preview" id="console-preview-body"></div>
+                <div class="console-mini-input">
+                  <span class="prompt">›</span>
+                  <input type="text" id="console-preview-cmd" placeholder="Enter a command..." autocomplete="off" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Console tab -->
+          <div class="tab-pane hidden" id="tab-console">
+            <div class="console-full">
+              <div class="console-toolbar">
+                <span class="console-toolbar-title">Server Console</span>
+                <button class="btn btn-ghost btn-xs" id="btn-console-clear">Clear</button>
+                <button class="btn btn-ghost btn-xs" id="btn-console-reconnect">↻ Reconnect</button>
+              </div>
+              <div class="console-output" id="console-output"></div>
+              <div class="console-input-row">
+                <span class="prompt">›</span>
+                <input type="text" id="console-cmd" placeholder="Type a server command..." autocomplete="off" />
+                <button class="btn btn-primary btn-sm" id="console-send">Send</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Files tab -->
+          <div class="tab-pane hidden" id="tab-files">
+            <div class="files-layout">
+              <div class="files-sidebar">
+                <div class="files-toolbar">
+                  <button class="btn btn-ghost btn-xs" id="btn-file-newfile" title="New File">+ File</button>
+                  <button class="btn btn-ghost btn-xs" id="btn-file-newfolder" title="New Folder">+ Folder</button>
+                  <button class="btn btn-ghost btn-xs btn-danger-text" id="btn-file-delete" title="Delete selected">Delete</button>
+                </div>
+                <div class="files-breadcrumb" id="files-breadcrumb">/</div>
+                <div class="files-list" id="files-list"></div>
+              </div>
+              <div class="files-editor">
+                <div class="files-editor-header">
+                  <span id="files-editor-name">Select a file to edit</span>
+                  <button class="btn btn-primary btn-xs hidden" id="btn-file-save">Save</button>
+                </div>
+                <textarea id="files-editor-content" class="files-editor-content" placeholder="Select a file to view its contents..." readonly></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Players tab -->
+          <div class="tab-pane hidden" id="tab-players">
+            <div class="players-layout">
+              <div class="card">
+                <div class="card-header">
+                  <span>Online Players</span>
+                  <button class="btn btn-ghost btn-xs" id="btn-refresh-players">↻ Refresh</button>
+                </div>
+                <div class="card-body" id="players-online">
+                  <div class="empty-state-sm">Loading players...</div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-header">
+                  <span>Server Command</span>
+                </div>
+                <div class="card-body">
+                  <div class="command-row">
+                    <input type="text" id="player-cmd" placeholder='e.g., op PlayerName, ban PlayerName, whitelist add PlayerName' autocomplete="off" />
+                    <button class="btn btn-primary btn-sm" id="player-cmd-send">Run</button>
+                  </div>
+                  <div class="command-result" id="player-cmd-result"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </main>
   </div>
 
-  <!-- ── Server card template ──────────────────────────────── -->
-  <template id="server-card-tpl">
-    <div class="server-card" data-id="">
-      <div class="server-card-header">
-        <span class="server-game-icon"></span>
-        <span class="server-name"></span>
-        <span class="server-status-badge"></span>
-      </div>
-      <div class="server-card-meta">
-        <span class="meta-item">🧠 <span class="server-ram"></span></span>
-        <span class="meta-item">🔌 Port <span class="server-port"></span></span>
-      </div>
-      <div class="server-card-actions">
-        <button class="btn btn-sm btn-start">▶ Start</button>
-        <button class="btn btn-sm btn-stop">⏹ Stop</button>
-        <button class="btn btn-sm btn-logs">📋 Logs</button>
-        <button class="btn btn-sm btn-danger btn-delete">🗑 Delete</button>
-      </div>
-    </div>
-  </template>
-
-  <!-- ── Logs modal ────────────────────────────────────────── -->
-  <div class="modal-overlay hidden" id="logs-modal">
+  <!-- ═══ Create Server Modal ═════════════════════════════════════════════ -->
+  <div class="modal-overlay hidden" id="create-modal">
     <div class="modal">
       <div class="modal-header">
-        <span id="logs-modal-title">Server Logs</span>
-        <button class="btn btn-ghost btn-sm" id="logs-close">✕</button>
+        <h3>Create New Server</h3>
+        <button class="btn btn-ghost btn-xs" id="create-modal-close">✕</button>
       </div>
-      <pre class="logs-body" id="logs-body"></pre>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="create-name">Server Name</label>
+          <input type="text" id="create-name" placeholder="My Minecraft Server" autocomplete="off" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="create-game">Game</label>
+            <select id="create-game">
+              <option value="minecraft">Minecraft</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="create-type">Server Type</label>
+            <select id="create-type">
+              <option value="vanilla">Vanilla</option>
+              <option value="paper" selected>Paper</option>
+              <option value="spigot">Spigot</option>
+              <option value="purpur">Purpur</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="create-ram">RAM</label>
+          <select id="create-ram">
+            <option value="1G">1 GB</option>
+            <option value="2G" selected>2 GB</option>
+            <option value="4G">4 GB</option>
+            <option value="8G">8 GB</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="create-cancel">Cancel</button>
+        <button class="btn btn-primary" id="create-submit">Create Server</button>
+      </div>
     </div>
   </div>
 

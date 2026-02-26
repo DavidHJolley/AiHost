@@ -27,7 +27,7 @@ const MINECRAFT = {
     'spawn-protection':     { type: 'integer', default: 16,   min: 0,   max: 100,   description: 'Spawn protection radius in blocks' },
     'enable-command-block': { type: 'boolean', default: false,                        description: 'Enable command blocks' },
     'max-world-size':       { type: 'integer', default: 29999984, min: 1, max: 29999984, description: 'Maximum world border radius' },
-    'level-type':           { type: 'enum',    default: 'minecraft\\:normal', values: ['minecraft\\:normal', 'minecraft\\:flat', 'minecraft\\:large_biomes', 'minecraft\\:amplified'], description: 'World generation type' },
+    'level-type':           { type: 'enum',    default: 'minecraft:normal', values: ['minecraft:normal', 'minecraft:flat', 'minecraft:large_biomes', 'minecraft:amplified'], description: 'World generation type' },
     'level-seed':           { type: 'string',  default: '',                           description: 'World generation seed' },
     'max-tick-time':        { type: 'integer', default: 60000, min: -1, max: 300000, description: 'Max tick time in ms (-1 disables watchdog)' },
     'spawn-monsters':       { type: 'boolean', default: true,                         description: 'Spawn hostile mobs' },

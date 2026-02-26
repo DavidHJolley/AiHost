@@ -1,26 +1,13 @@
 /**
  * index.js
- * Main Express server for AI-Driven Game Server Hosting.
- *
- * Routes:
- *   GET    /                          → serves client/index.html
- *   GET    /servers                   → list all servers (syncs Docker status)
- *   POST   /servers/create            → create a new server
- *   GET    /servers/:id               → get server info
- *   GET    /servers/:id/status        → detailed status + config + Docker info
- *   GET    /servers/:id/files         → list files in server directory
- *   GET    /servers/:id/configs       → parsed server.properties
- *   POST   /servers/:id/start         → start server container
- *   POST   /servers/:id/stop          → stop server container
- *   POST   /servers/:id/restart       → restart server container
- *   POST   /servers/:id/delete        → remove server + container
- *   GET    /servers/:id/logs          → get container logs
- *   POST   /ai                        → natural language → structured actions → execute
+ * Main Express + WebSocket server for AI-Driven Game Server Hosting.
  */
 
 require('dotenv').config();
 
 const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -32,13 +19,14 @@ const ai = require('./ai');
 const actions = require('./actions');
 
 const app = express();
+const httpServer = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const SERVERS_PATH = path.join(process.cwd(), 'servers');
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
@@ -75,14 +63,32 @@ function findServerByName(name) {
   );
 }
 
-// Shared context object passed to the action executor
+function safePath(serverDir, relativePath) {
+  if (!relativePath) return serverDir;
+  const resolved = path.resolve(serverDir, relativePath);
+  const normalizedBase = path.resolve(serverDir);
+  if (!resolved.startsWith(normalizedBase + path.sep) && resolved !== normalizedBase) {
+    throw new Error('Path outside server directory');
+  }
+  return resolved;
+}
+
+const BINARY_EXTS = new Set([
+  '.jar', '.zip', '.gz', '.tar', '.png', '.jpg', '.jpeg', '.gif',
+  '.dat', '.mca', '.nbt', '.db', '.db-shm', '.db-wal', '.lock',
+  '.so', '.dll', '.exe', '.class', '.bak',
+]);
+
+function isBinary(p) {
+  return BINARY_EXTS.has(path.extname(p).toLowerCase());
+}
+
 const executionCtx = { db, docker, serversPath: SERVERS_PATH };
 
 // ─── Server list ──────────────────────────────────────────────────────────────
 
 app.get('/servers', asyncHandler(async (_req, res) => {
   const servers = db.getAllServers();
-
   for (const server of servers) {
     if (server.container_id) {
       try {
@@ -100,20 +106,18 @@ app.get('/servers', asyncHandler(async (_req, res) => {
       }
     }
   }
-
   ok(res, { servers });
 }));
 
 // ─── Create server ────────────────────────────────────────────────────────────
 
 app.post('/servers/create', asyncHandler(async (req, res) => {
-  let { name, game = 'minecraft', ram = '2G', properties = {} } = req.body;
-
+  let { name, game = 'minecraft', ram = '2G', server_type = 'vanilla', properties = {} } = req.body;
   if (!name || !name.trim()) return fail(res, 'Server name is required');
-
   name = name.trim();
   game = game.toLowerCase().trim();
   ram = normaliseRam(ram);
+  server_type = (server_type || 'vanilla').toLowerCase().trim();
 
   const supported = ['minecraft'];
   if (!supported.includes(game)) {
@@ -123,7 +127,7 @@ app.post('/servers/create', asyncHandler(async (req, res) => {
   const id = uuidv4();
   let server;
   try {
-    server = db.createServer({ id, name, game, ram });
+    server = db.createServer({ id, name, game, ram, server_type });
   } catch (err) {
     if (err.message.includes('UNIQUE constraint')) {
       return fail(res, 'A server with that port already exists. Try again.');
@@ -159,7 +163,7 @@ app.get('/servers/:id', asyncHandler(async (req, res) => {
   ok(res, { server });
 }));
 
-// ─── Detailed server status (Step 2 — Server Awareness) ──────────────────────
+// ─── Detailed server status ──────────────────────────────────────────────────
 
 app.get('/servers/:id/status', asyncHandler(async (req, res) => {
   const server = db.getServerById(req.params.id);
@@ -176,43 +180,135 @@ app.get('/servers/:id/status', asyncHandler(async (req, res) => {
 
   const serverDir = path.join(SERVERS_PATH, server.id);
   const config = actions.readServerProperties(serverDir);
-
   ok(res, { server, docker: dockerInfo, config });
 }));
 
-// ─── List server files (Step 2 — Server Awareness) ───────────────────────────
+// ─── File management ──────────────────────────────────────────────────────────
 
 app.get('/servers/:id/files', asyncHandler(async (req, res) => {
   const server = db.getServerById(req.params.id);
   if (!server) return fail(res, 'Server not found', 404);
 
   const serverDir = path.join(SERVERS_PATH, server.id);
-  if (!fs.existsSync(serverDir)) {
-    return ok(res, { files: [] });
+  if (!fs.existsSync(serverDir)) return ok(res, { files: [], currentPath: '' });
+
+  const subpath = req.query.path || '';
+  let targetDir;
+  try { targetDir = safePath(serverDir, subpath); }
+  catch (e) { return fail(res, e.message); }
+
+  if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
+    return fail(res, 'Directory not found', 404);
   }
 
-  function listDir(dir, prefix = '') {
-    const entries = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        entries.push({ name: relativePath, type: 'directory' });
-        // Only go one level deep to avoid huge responses
-        if (!prefix) {
-          entries.push(...listDir(path.join(dir, entry.name), relativePath));
-        }
-      } else {
-        const stat = fs.statSync(path.join(dir, entry.name));
-        entries.push({ name: relativePath, type: 'file', size: stat.size });
-      }
+  const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+  const files = entries.map((entry) => {
+    const fullPath = path.join(targetDir, entry.name);
+    const rel = path.relative(serverDir, fullPath).replace(/\\/g, '/');
+    if (entry.isDirectory()) {
+      return { name: entry.name, path: rel, type: 'directory' };
     }
-    return entries;
-  }
+    try {
+      const stat = fs.statSync(fullPath);
+      return { name: entry.name, path: rel, type: 'file', size: stat.size };
+    } catch {
+      return { name: entry.name, path: rel, type: 'file', size: 0 };
+    }
+  });
 
-  ok(res, { files: listDir(serverDir) });
+  files.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  ok(res, { files, currentPath: subpath });
 }));
 
-// ─── Get server config (Step 2 — Server Awareness) ──────────────────────────
+app.get('/servers/:id/files/read', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const serverDir = path.join(SERVERS_PATH, server.id);
+  let filePath;
+  try { filePath = safePath(serverDir, req.query.path); }
+  catch (e) { return fail(res, e.message); }
+
+  if (!fs.existsSync(filePath)) return fail(res, 'File not found', 404);
+  const stat = fs.statSync(filePath);
+  if (stat.isDirectory()) return fail(res, 'Path is a directory');
+  if (stat.size > 2 * 1024 * 1024) return fail(res, 'File too large (max 2 MB)');
+  if (isBinary(filePath)) return fail(res, 'Binary files cannot be displayed');
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  ok(res, { content, path: req.query.path, size: stat.size });
+}));
+
+app.put('/servers/:id/files/write', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { path: fPath, content } = req.body;
+  if (!fPath) return fail(res, 'Path is required');
+
+  const serverDir = path.join(SERVERS_PATH, server.id);
+  let fullPath;
+  try { fullPath = safePath(serverDir, fPath); }
+  catch (e) { return fail(res, e.message); }
+
+  fs.writeFileSync(fullPath, content ?? '', 'utf8');
+  ok(res, { message: 'File saved' });
+}));
+
+app.post('/servers/:id/files/create', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { path: fPath, type = 'file' } = req.body;
+  if (!fPath) return fail(res, 'Path is required');
+
+  const serverDir = path.join(SERVERS_PATH, server.id);
+  let fullPath;
+  try { fullPath = safePath(serverDir, fPath); }
+  catch (e) { return fail(res, e.message); }
+
+  if (fs.existsSync(fullPath)) return fail(res, 'Path already exists');
+
+  if (type === 'directory') {
+    fs.mkdirSync(fullPath, { recursive: true });
+  } else {
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(fullPath, '', 'utf8');
+  }
+
+  ok(res, { message: `${type === 'directory' ? 'Directory' : 'File'} created` });
+}));
+
+app.post('/servers/:id/files/delete', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { path: fPath } = req.body;
+  if (!fPath) return fail(res, 'Path is required');
+
+  const serverDir = path.join(SERVERS_PATH, server.id);
+  let fullPath;
+  try { fullPath = safePath(serverDir, fPath); }
+  catch (e) { return fail(res, e.message); }
+
+  if (!fs.existsSync(fullPath)) return fail(res, 'Path not found', 404);
+
+  const stat = fs.statSync(fullPath);
+  if (stat.isDirectory()) {
+    fs.rmSync(fullPath, { recursive: true, force: true });
+  } else {
+    fs.unlinkSync(fullPath);
+  }
+
+  ok(res, { message: 'Deleted' });
+}));
+
+// ─── Server config ────────────────────────────────────────────────────────────
 
 app.get('/servers/:id/configs', asyncHandler(async (req, res) => {
   const server = db.getServerById(req.params.id);
@@ -247,7 +343,6 @@ app.post('/servers/:id/start', asyncHandler(async (req, res) => {
       db.updateServerStatus(server.id, 'starting');
       await docker.startContainer(server.container_id);
     }
-
     db.updateServerStatus(server.id, 'running');
     server = db.getServerById(server.id);
     ok(res, { server });
@@ -316,6 +411,25 @@ app.get('/servers/:id/logs', asyncHandler(async (req, res) => {
   ok(res, { logs });
 }));
 
+// ─── Send command to server ───────────────────────────────────────────────────
+
+app.post('/servers/:id/command', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+  if (!server.container_id) return fail(res, 'No container');
+  if (server.status !== 'running') return fail(res, 'Server is not running');
+
+  const { command } = req.body;
+  if (!command || !command.trim()) return fail(res, 'Command is required');
+
+  try {
+    const result = await docker.execCommand(server.container_id, command.trim());
+    ok(res, { result });
+  } catch (err) {
+    fail(res, `Command failed: ${err.message}`, 500);
+  }
+}));
+
 // ─── AI endpoint ──────────────────────────────────────────────────────────────
 
 app.post('/ai', asyncHandler(async (req, res) => {
@@ -324,14 +438,10 @@ app.post('/ai', asyncHandler(async (req, res) => {
 
   console.log(`[AI] User: "${message}"`);
 
-  // Step 2 — Build server awareness context
   const serverContext = await ai.buildServerContext(db, docker, SERVERS_PATH);
-
-  // Step 1/3/4 — Parse natural language into structured action(s)
   const intent = await ai.parseMessage(message, history, serverContext);
   console.log('[AI] Intent:', JSON.stringify(intent));
 
-  // Handle error/unknown from the AI itself
   if (intent.action === 'error') {
     return res.status(500).json({ success: false, reply: intent.message, action: intent });
   }
@@ -342,24 +452,18 @@ app.post('/ai', asyncHandler(async (req, res) => {
     });
   }
 
-  // Step 4 — Multi-step plan execution
   if (intent.action === 'multi_step' && Array.isArray(intent.steps)) {
     console.log(`[AI] Executing multi-step plan: ${intent.steps.length} steps`);
     const result = await actions.executePlan(intent.steps, executionCtx);
     return ok(res, { reply: result.reply, action: intent, results: result.results });
   }
 
-  // Single action execution
   const result = await actions.executeAction(intent, executionCtx);
 
-  // Step 5 — If diagnose came back with no pattern matches, do AI log analysis
   if (intent.action === 'diagnose_server' && result.needsAiAnalysis && result.logs) {
     console.log('[AI] Running second-pass log analysis');
     const analysis = await ai.analyzeLogs(
-      intent.name,
-      result.logs,
-      result.config,
-      serverContext
+      intent.name, result.logs, result.config, serverContext,
     );
     result.reply += `\n\n**AI Analysis:**\n${analysis}`;
   }
@@ -385,9 +489,70 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ success: false, error: err.message });
 });
 
+// ─── WebSocket server ─────────────────────────────────────────────────────────
+
+const wss = new WebSocket.Server({ server: httpServer, path: '/ws' });
+
+wss.on('connection', (ws) => {
+  let logStream = null;
+  let subscribedId = null;
+
+  ws.on('message', async (raw) => {
+    let data;
+    try { data = JSON.parse(raw); } catch { return; }
+
+    if (data.type === 'subscribe' && data.serverId) {
+      if (logStream) { logStream.destroy(); logStream = null; }
+
+      const srv = db.getServerById(data.serverId);
+      if (!srv || !srv.container_id) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Server not found or no container' }));
+        return;
+      }
+
+      subscribedId = data.serverId;
+
+      try {
+        logStream = await docker.streamContainerLogs(srv.container_id, (line) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'log', data: line }));
+          }
+        });
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'error', message: err.message }));
+      }
+    }
+
+    if (data.type === 'command' && data.command) {
+      const sid = data.serverId || subscribedId;
+      if (!sid) return;
+      const srv = db.getServerById(sid);
+      if (!srv || !srv.container_id) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Server not available' }));
+        return;
+      }
+      try {
+        const result = await docker.execCommand(srv.container_id, data.command);
+        ws.send(JSON.stringify({ type: 'command_result', data: result, command: data.command }));
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'command_error', message: err.message, command: data.command }));
+      }
+    }
+
+    if (data.type === 'unsubscribe') {
+      if (logStream) { logStream.destroy(); logStream = null; }
+      subscribedId = null;
+    }
+  });
+
+  ws.on('close', () => { if (logStream) logStream.destroy(); });
+  ws.on('error', () => { if (logStream) logStream.destroy(); });
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`Game Server Hosting running at http://localhost:${PORT}`);
+  console.log(`  WebSocket: ws://localhost:${PORT}/ws`);
   console.log(`  AI model: ${process.env.GROQ_API_KEY ? 'Groq API key loaded' : 'GROQ_API_KEY not set'}`);
 });

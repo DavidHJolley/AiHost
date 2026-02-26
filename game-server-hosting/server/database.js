@@ -50,8 +50,8 @@ try {
 
 const stmts = {
   insert: db.prepare(`
-    INSERT INTO servers (id, name, game, ram, port, status)
-    VALUES (@id, @name, @game, @ram, @port, @status)
+    INSERT INTO servers (id, name, game, ram, port, status, server_type)
+    VALUES (@id, @name, @game, @ram, @port, @status, @server_type)
   `),
 
   findAll: db.prepare(`SELECT * FROM servers ORDER BY created_at DESC`),
@@ -93,9 +93,9 @@ function getNextPort() {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-function createServer({ id, name, game, ram }) {
+function createServer({ id, name, game, ram, server_type = 'vanilla' }) {
   const port = getNextPort();
-  stmts.insert.run({ id, name, game: game.toLowerCase(), ram, port, status: 'stopped' });
+  stmts.insert.run({ id, name, game: game.toLowerCase(), ram, port, status: 'stopped', server_type });
   return stmts.findById.get(id);
 }
 

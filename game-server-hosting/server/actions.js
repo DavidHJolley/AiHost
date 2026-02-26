@@ -26,7 +26,7 @@ const ACTION_SCHEMAS = {
   },
   create_server: {
     required: [],
-    optional: ['name', 'game', 'ram', 'properties'],
+    optional: ['name', 'game', 'ram', 'properties', 'server_type'],
   },
   modify_server: {
     required: ['name'],
@@ -173,10 +173,16 @@ const executors = {
     const game = (action.game || 'minecraft').toLowerCase();
     const ram = normaliseRam(action.ram || '2G');
     const properties = action.properties || {};
+    const serverType = (action.server_type || 'vanilla').toLowerCase();
 
     const supported = ['minecraft'];
     if (!supported.includes(game)) {
       return { success: false, reply: `Unsupported game "${game}". Supported: ${supported.join(', ')}` };
+    }
+
+    const validTypes = ['vanilla', 'paper', 'spigot', 'purpur'];
+    if (!validTypes.includes(serverType)) {
+      return { success: false, reply: `Unsupported server type "${serverType}". Supported: ${validTypes.join(', ')}` };
     }
 
     if (Object.keys(properties).length > 0) {
@@ -192,7 +198,7 @@ const executors = {
     const id = uuidv4();
     let server;
     try {
-      server = ctx.db.createServer({ id, name, game, ram });
+      server = ctx.db.createServer({ id, name, game, ram, server_type: serverType });
     } catch (err) {
       if (err.message.includes('UNIQUE constraint')) {
         return { success: false, reply: 'A server with that port already exists. Try again.' };
@@ -208,7 +214,7 @@ const executors = {
       server = ctx.db.getServerById(id);
       return {
         success: true,
-        reply: `Server **${name}** created and started on port ${server.port} with ${ram} RAM.`,
+        reply: `Server **${name}** (${serverType}) created and started on port ${server.port} with ${ram} RAM.`,
         server,
       };
     } catch (err) {
