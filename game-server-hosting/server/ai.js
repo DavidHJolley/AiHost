@@ -32,7 +32,8 @@ You can do TWO things:
 CRITICAL RULE: If the user is asking a QUESTION that you can answer from the server state below, use "chat" to respond naturally. Do NOT dump raw data — answer like a helpful person would.
 
 RULES:
-- Always respond with ONLY valid JSON. No text before or after.
+- ALWAYS respond with exactly ONE JSON object. No text before or after. Never output multiple JSON objects.
+- If the user asks for multiple things, use "multi_step" to combine them into ONE JSON response.
 - For questions you can answer from context → use "chat" with a natural, helpful message.
 - For requests that require doing something → use the appropriate action.
 - Be conversational in chat messages. Answer specifically what was asked.
@@ -44,7 +45,6 @@ RULES:
 - For config properties, use SCREAMING_SNAKE_CASE keys (e.g. MAX_PLAYERS, VIEW_DISTANCE).
 - ONLY use config keys from the valid keys list below. Never invent config keys.
 - If the user asks about problems, crashes, or lag → use "diagnose_server".
-- If a request requires multiple sequential steps → return a "multi_step" plan.
 - If the user has only ONE server, assume they're asking about that server when no name is given.
 
 AVAILABLE ACTIONS:
@@ -81,6 +81,28 @@ AVAILABLE ACTIONS:
 
 9. diagnose_server — Analyze logs and diagnose issues
    {"action":"diagnose_server","name":"<name>"}
+
+10. install_plugin — Search for and install a plugin from Modrinth
+    {"action":"install_plugin","name":"<server>","query":"<search terms>"}
+    OR install a specific plugin by slug:
+    {"action":"install_plugin","name":"<server>","slug":"<modrinth-slug>"}
+    If the server is vanilla, it will be auto-upgraded to Paper.
+
+11. search_plugins — Search Modrinth for plugins (browse without installing)
+    {"action":"search_plugins","query":"<search terms>"}
+
+12. list_plugins — Show installed plugins on a server
+    {"action":"list_plugins","name":"<server>"}
+
+13. remove_plugin — Remove an installed plugin
+    {"action":"remove_plugin","name":"<server>","pluginName":"<filename or partial name>"}
+
+PLUGIN RULES:
+- When the user asks for a feature/functionality (e.g. "I want teleportation"), translate that into a plugin search query.
+- Common mappings: teleport/tp/homes → "essentials", economy/money → "vault economy", permissions/ranks → "luckperms", world edit/building → "worldedit", protection/claims → "griefprevention"
+- Use "install_plugin" with a "query" when the user describes what they want. Use "slug" when they name a specific plugin.
+- If the user just wants to browse, use "search_plugins".
+- Vanilla servers will be auto-upgraded to Paper for plugin support — no need to warn about this.
 
 Multi-step plan format (for complex requests needing sequential actions):
 {"action":"multi_step","steps":[{"action":"..."},{"action":"..."}]}
@@ -128,6 +150,33 @@ User: "Restart my server"
 
 User: "Show me all servers"
 {"action":"list_servers"}
+
+User: "I want a plugin where I can TP"
+{"action":"install_plugin","name":"minecraft-cace","query":"essentials teleport homes"}
+
+User: "Install worldedit"
+{"action":"install_plugin","name":"minecraft-cace","slug":"worldedit"}
+
+User: "I need a permissions plugin"
+{"action":"install_plugin","name":"minecraft-cace","query":"luckperms permissions"}
+
+User: "Show me economy plugins"
+{"action":"search_plugins","query":"economy vault money"}
+
+User: "What plugins do I have installed?"
+{"action":"list_plugins","name":"minecraft-cace"}
+
+User: "Remove essentials from my server"
+{"action":"remove_plugin","name":"minecraft-cace","pluginName":"essentials"}
+
+User: "I want land claims and teleporting"
+{"action":"multi_step","steps":[{"action":"install_plugin","name":"minecraft-cace","query":"griefprevention land claims"},{"action":"install_plugin","name":"minecraft-cace","query":"essentials teleport homes"}]}
+
+User: "Create a Minecraft server called Survival with 4GB and I want a teleport plugin"
+{"action":"multi_step","steps":[{"action":"create_server","name":"Survival","game":"minecraft","ram":"4G","properties":{}},{"action":"install_plugin","name":"Survival","query":"essentials teleport homes"}]}
+
+User: "Make a creative server with worldedit"
+{"action":"multi_step","steps":[{"action":"create_server","name":"creative","game":"minecraft","ram":"2G","properties":{"GAMEMODE":"creative"}},{"action":"install_plugin","name":"creative","slug":"worldedit"}]}
 
 If the request is unclear or unrelated, return:
 {"action":"unknown","message":"<brief explanation>"}`;
@@ -179,11 +228,70 @@ async function buildServerContext(db, docker, serversPath) {
       }
     } catch {}
 
-    lines.push(`- "${server.name}" (${server.game}) — ${status} — port ${server.port}, RAM ${server.ram}`);
+    const type = server.server_type || 'vanilla';
+    lines.push(`- "${server.name}" (${server.game}, ${type}) — ${status} — port ${server.port}, RAM ${server.ram}`);
     if (configSnippet) lines.push(configSnippet);
+
+    // Include installed plugins
+    try {
+      const pluginsMod = require('./plugins');
+      const installed = pluginsMod.listInstalledPlugins(serversPath, server.id);
+      if (installed.length > 0) {
+        lines.push(`  Plugins: ${installed.map((p) => p.filename).join(', ')}`);
+      }
+    } catch {}
   }
 
   return lines.join('\n');
+}
+
+// ─── Response parser ──────────────────────────────────────────────────────────
+
+/**
+ * Parse the AI's raw text into a structured action.
+ * Handles edge cases where the LLM returns:
+ *   - A single JSON object (normal)
+ *   - Multiple JSON objects on separate lines (wraps into multi_step)
+ *   - A JSON array of objects (wraps into multi_step)
+ */
+function parseAIResponse(text) {
+  // Try direct parse first (happy path)
+  try {
+    const obj = JSON.parse(text);
+    // If it's an array of actions, wrap into multi_step
+    if (Array.isArray(obj)) {
+      return { action: 'multi_step', steps: obj };
+    }
+    return obj;
+  } catch {
+    // Not valid JSON as-is — try to recover
+  }
+
+  // Try splitting on newlines and parsing each line as a JSON object
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const objects = [];
+  for (const line of lines) {
+    try {
+      objects.push(JSON.parse(line));
+    } catch {
+      // skip non-JSON lines
+    }
+  }
+
+  if (objects.length === 1) return objects[0];
+  if (objects.length > 1) return { action: 'multi_step', steps: objects };
+
+  // Try extracting JSON from surrounding text (LLM sometimes adds prose)
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      // fall through
+    }
+  }
+
+  return null;
 }
 
 // ─── Parse message ────────────────────────────────────────────────────────────
@@ -227,10 +335,8 @@ async function parseMessage(userMessage, history = [], serverContext = '') {
     const text = response.data.choices[0].message.content.trim();
     const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
-    let parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
+    const parsed = parseAIResponse(cleaned);
+    if (!parsed) {
       return {
         action: 'unknown',
         message: `AI returned non-JSON: ${text.slice(0, 200)}`,

@@ -37,21 +37,22 @@ function serverVolumePath(serverId) {
   const base = process.env.SERVERS_HOST_PATH || path.join(process.cwd(), 'servers');
   const dir = path.join(base, serverId);
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
   }
+  try { fs.chmodSync(dir, 0o777); } catch {}
   return dir;
 }
 
-function buildEnvVars(game, ram, extra = {}) {
+function buildEnvVars(game, ram, extra = {}, serverType = 'vanilla') {
   const env = { ...extra };
 
   if (game === 'minecraft') {
     env.EULA = 'TRUE';
-    env.MEMORY = ram;          // e.g. "4G" or "512M"
-    env.TYPE = 'VANILLA';
+    env.MEMORY = ram;
+    env.TYPE = (serverType || 'vanilla').toUpperCase();
     env.VERSION = 'LATEST';
-    env.ONLINE_MODE = 'FALSE'; // allow offline (cracked) clients for easy local testing
-    env.OVERRIDE_SERVER_PROPERTIES = 'false'; // don't overwrite server.properties on restart
+    env.ONLINE_MODE = 'FALSE';
+    env.OVERRIDE_SERVER_PROPERTIES = 'false';
     if (extra.SERVER_PORT) env.SERVER_PORT = extra.SERVER_PORT;
   }
 
@@ -82,7 +83,7 @@ async function ensureImage(image) {
 // ─── Create container (does NOT start it) ────────────────────────────────────
 
 async function createContainer(server, properties = {}) {
-  const { id, game, ram, port } = server;
+  const { id, game, ram, port, server_type } = server;
   const image = GAME_IMAGES[game];
 
   if (!image) throw new Error(`Unsupported game: ${game}`);
@@ -97,7 +98,7 @@ async function createContainer(server, properties = {}) {
   const container = await docker.createContainer({
     name: containerName(id),
     Image: image,
-    Env: buildEnvVars(game, ram, extra),
+    Env: buildEnvVars(game, ram, extra, server_type),
     HostConfig: {
       Binds: [`${volumePath}:/data`],
       NetworkMode: 'host',

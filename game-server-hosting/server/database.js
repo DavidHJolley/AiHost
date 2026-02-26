@@ -33,10 +33,18 @@ db.exec(`
     port        INTEGER NOT NULL UNIQUE,
     status      TEXT NOT NULL DEFAULT 'stopped',
     container_id TEXT,
+    server_type TEXT NOT NULL DEFAULT 'vanilla',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// Migration: add server_type to existing databases
+try {
+  db.exec(`ALTER TABLE servers ADD COLUMN server_type TEXT NOT NULL DEFAULT 'vanilla'`);
+} catch {
+  // Column already exists
+}
 
 // ─── Statements ──────────────────────────────────────────────────────────────
 
@@ -59,6 +67,12 @@ const stmts = {
   updateStatusOnly: db.prepare(`
     UPDATE servers
     SET status = @status, updated_at = datetime('now')
+    WHERE id = @id
+  `),
+
+  updateServerType: db.prepare(`
+    UPDATE servers
+    SET server_type = @server_type, updated_at = datetime('now')
     WHERE id = @id
   `),
 
@@ -102,6 +116,11 @@ function updateServerStatus(id, status, containerId = null) {
   return stmts.findById.get(id);
 }
 
+function updateServerType(id, serverType) {
+  stmts.updateServerType.run({ id, server_type: serverType });
+  return stmts.findById.get(id);
+}
+
 function deleteServer(id) {
   stmts.delete.run(id);
 }
@@ -111,5 +130,6 @@ module.exports = {
   getAllServers,
   getServerById,
   updateServerStatus,
+  updateServerType,
   deleteServer,
 };

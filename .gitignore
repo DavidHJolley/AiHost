@@ -17,3 +17,12 @@ Desktop.ini
 # IDE
 .vscode/
 !.vscode/settings.json
+
+# Server data — world files, configs, plugins, databases
+# Everything in servers/ is runtime data, not source code
+game-server-hosting/servers/
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal

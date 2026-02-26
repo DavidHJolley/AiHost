@@ -15,6 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const templates = require('./templates');
+const plugins = require('./plugins');
 
 // ─── Action schemas ────────────────────────────────────────────────────────────
 
@@ -56,6 +57,22 @@ const ACTION_SCHEMAS = {
     optional: [],
   },
   diagnose_server: {
+    required: ['name'],
+    optional: [],
+  },
+  search_plugins: {
+    required: ['query'],
+    optional: [],
+  },
+  install_plugin: {
+    required: ['name'],
+    optional: ['query', 'slug'],
+  },
+  remove_plugin: {
+    required: ['name', 'pluginName'],
+    optional: [],
+  },
+  list_plugins: {
     required: ['name'],
     optional: [],
   },
@@ -425,6 +442,179 @@ const executors = {
       logs: logs.slice(-2000),
       config,
       needsAiAnalysis: true,
+    };
+  },
+
+  async search_plugins(action, _ctx) {
+    try {
+      const results = await plugins.searchPlugins(action.query, { limit: 5 });
+      if (results.length === 0) {
+        return { success: true, reply: `No plugins found for "${action.query}". Try different keywords.` };
+      }
+      const lines = results.map((p, i) =>
+        `${i + 1}. **${p.title}** (\`${p.slug}\`) — ${p.description}\n   ${p.downloads.toLocaleString()} downloads`
+      );
+      return {
+        success: true,
+        reply: `**Plugins matching "${action.query}":**\n\n${lines.join('\n\n')}\n\nSay "install <name> on <server>" to install one.`,
+        results,
+      };
+    } catch (err) {
+      return { success: false, reply: `Plugin search failed: ${err.message}` };
+    }
+  },
+
+  async install_plugin(action, ctx) {
+    const server = findServerByName(ctx.db, action.name);
+    if (!server) {
+      return { success: false, reply: `No server found with name "${action.name}".` };
+    }
+
+    const PLUGIN_LOADERS = ['paper', 'spigot', 'purpur'];
+    const needsUpgrade = !PLUGIN_LOADERS.includes(server.server_type);
+    let upgraded = false;
+
+    // Auto-upgrade vanilla → Paper for plugin support
+    if (needsUpgrade) {
+      try {
+        // Stop and remove the vanilla container
+        if (server.container_id) {
+          try { await ctx.docker.stopContainer(server.container_id); } catch {}
+          try { await ctx.docker.removeContainer(server.container_id); } catch {}
+        }
+
+        // Update DB to paper
+        ctx.db.updateServerType(server.id, 'paper');
+        ctx.db.updateServerStatus(server.id, 'stopped', null);
+        upgraded = true;
+      } catch (err) {
+        return { success: false, reply: `Failed to upgrade server to Paper: ${err.message}`, server };
+      }
+    }
+
+    // Install the plugin
+    let pluginInfo;
+    try {
+      pluginInfo = await plugins.installPlugin(ctx.serversPath, server.id, {
+        slug: action.slug,
+        query: action.query,
+      });
+    } catch (err) {
+      return { success: false, reply: `Plugin install failed: ${err.message}`, server };
+    }
+
+    if (pluginInfo.alreadyInstalled) {
+      return {
+        success: true,
+        reply: `**${pluginInfo.title}** v${pluginInfo.version} is already installed on **${server.name}**.`,
+        server,
+        plugin: pluginInfo,
+      };
+    }
+
+    // If we upgraded, recreate and start the Paper container
+    if (upgraded) {
+      try {
+        const updatedServer = ctx.db.getServerById(server.id);
+        const containerId = await ctx.docker.createContainer(updatedServer);
+        ctx.db.updateServerStatus(server.id, 'starting', containerId);
+        await ctx.docker.startContainer(containerId);
+        ctx.db.updateServerStatus(server.id, 'running', containerId);
+
+        return {
+          success: true,
+          reply: [
+            `**${pluginInfo.title}** v${pluginInfo.version} installed on **${server.name}**.`,
+            ``,
+            `Server was automatically upgraded from vanilla to **Paper** (required for plugins).`,
+            `The server is now restarting with Paper — the plugin will load automatically.`,
+          ].join('\n'),
+          server: ctx.db.getServerById(server.id),
+          plugin: pluginInfo,
+        };
+      } catch (err) {
+        return {
+          success: false,
+          reply: `Plugin downloaded but failed to restart server with Paper: ${err.message}`,
+          server: ctx.db.getServerById(server.id),
+          plugin: pluginInfo,
+        };
+      }
+    }
+
+    // Server already supports plugins — just needs a restart
+    const restartHint = server.status === 'running'
+      ? `\n\n**Restart required** to load the plugin. Say "restart ${server.name}" to apply.`
+      : '';
+
+    return {
+      success: true,
+      reply: `**${pluginInfo.title}** v${pluginInfo.version} installed on **${server.name}**.${restartHint}`,
+      server,
+      plugin: pluginInfo,
+    };
+  },
+
+  async remove_plugin(action, ctx) {
+    const server = findServerByName(ctx.db, action.name);
+    if (!server) {
+      return { success: false, reply: `No server found with name "${action.name}".` };
+    }
+
+    try {
+      // Try exact match first, then fuzzy match on filename
+      const installed = plugins.listInstalledPlugins(ctx.serversPath, server.id);
+      const target = action.pluginName.toLowerCase();
+      const match = installed.find((p) => p.filename.toLowerCase() === target)
+        || installed.find((p) => p.filename.toLowerCase().includes(target));
+
+      if (!match) {
+        const names = installed.map((p) => p.filename).join(', ') || 'none';
+        return { success: false, reply: `Plugin "${action.pluginName}" not found. Installed: ${names}`, server };
+      }
+
+      plugins.removePlugin(ctx.serversPath, server.id, match.filename);
+
+      const restartHint = server.status === 'running'
+        ? ` Restart the server to unload it.`
+        : '';
+
+      return {
+        success: true,
+        reply: `Removed **${match.filename}** from **${server.name}**.${restartHint}`,
+        server,
+      };
+    } catch (err) {
+      return { success: false, reply: `Failed to remove plugin: ${err.message}`, server };
+    }
+  },
+
+  async list_plugins(action, ctx) {
+    const server = findServerByName(ctx.db, action.name);
+    if (!server) {
+      return { success: false, reply: `No server found with name "${action.name}".` };
+    }
+
+    const installed = plugins.listInstalledPlugins(ctx.serversPath, server.id);
+
+    if (installed.length === 0) {
+      return {
+        success: true,
+        reply: `No plugins installed on **${server.name}**. Say "install <plugin name>" to add one.`,
+        server,
+      };
+    }
+
+    const lines = installed.map((p) => {
+      const sizeMB = (p.size / 1024 / 1024).toFixed(1);
+      return `• **${p.filename}** (${sizeMB} MB)`;
+    });
+
+    return {
+      success: true,
+      reply: `**Plugins on ${server.name}:**\n${lines.join('\n')}`,
+      server,
+      plugins: installed,
     };
   },
 };
