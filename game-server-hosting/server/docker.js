@@ -8,6 +8,7 @@
  */
 
 const Dockerode = require('dockerode');
+const { PassThrough } = require('stream');
 const path = require('path');
 const fs = require('fs');
 
@@ -23,6 +24,8 @@ const GAME_IMAGES = {
 const GAME_PORTS = {
   minecraft: '25565/tcp',
 };
+
+const RCON_PASSWORD = 'gaming';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +56,8 @@ function buildEnvVars(game, ram, extra = {}, serverType = 'vanilla') {
     env.VERSION = 'LATEST';
     env.ONLINE_MODE = 'FALSE';
     env.OVERRIDE_SERVER_PROPERTIES = 'false';
+    env.ENABLE_RCON = 'true';
+    env.RCON_PASSWORD = RCON_PASSWORD;
     if (extra.SERVER_PORT) env.SERVER_PORT = extra.SERVER_PORT;
   }
 
@@ -209,27 +214,34 @@ async function findContainerByServerId(serverId) {
 async function execCommand(containerId, command) {
   const container = docker.getContainer(containerId);
   const exec = await container.exec({
-    Cmd: ['rcon-cli', command],
+    Cmd: ['rcon-cli', '--password', RCON_PASSWORD, ...command.split(/\s+/)],
     AttachStdout: true,
     AttachStderr: true,
-    Tty: true,
   });
 
   return new Promise((resolve, reject) => {
     let settled = false;
     const done = (val) => { if (!settled) { settled = true; resolve(val); } };
 
-    exec.start({ Tty: true }, (err, stream) => {
+    exec.start({ hijack: true }, (err, stream) => {
       if (err) return reject(err);
-      let output = '';
-      stream.on('data', (chunk) => { output += chunk.toString('utf8'); });
-      stream.on('end', () => done(output.trim()));
+
+      let stdout = '';
+      let stderr = '';
+      const outStream = new PassThrough();
+      const errStream = new PassThrough();
+
+      outStream.on('data', (c) => { stdout += c.toString('utf8'); });
+      errStream.on('data', (c) => { stderr += c.toString('utf8'); });
+
+      docker.modem.demuxStream(stream, outStream, errStream);
+
+      stream.on('end', () => done((stdout + stderr).trim()));
       stream.on('error', (e) => { if (!settled) { settled = true; reject(e); } });
 
-      // Safety: rcon-cli should finish quickly; don't hang forever
       setTimeout(() => {
         try { stream.destroy(); } catch {}
-        done(output.trim());
+        done((stdout + stderr).trim());
       }, 8000);
     });
   });
@@ -247,16 +259,22 @@ async function streamContainerLogs(containerId, onData) {
     timestamps: false,
   });
 
+  const outStream = new PassThrough();
+  const errStream = new PassThrough();
+  docker.modem.demuxStream(logStream, outStream, errStream);
+
   let buffer = '';
-  logStream.on('data', (chunk) => {
+  function processChunk(chunk) {
     buffer += chunk.toString('utf8');
     const lines = buffer.split('\n');
     buffer = lines.pop();
     for (const line of lines) {
-      const cleaned = line.length > 8 ? line.slice(8) : line;
-      if (cleaned.trim()) onData(cleaned);
+      if (line.trim()) onData(line);
     }
-  });
+  }
+
+  outStream.on('data', processChunk);
+  errStream.on('data', processChunk);
 
   return {
     destroy() { try { logStream.destroy(); } catch {} },

@@ -308,11 +308,9 @@
 
       if (data.type === 'log') addConsoleLine(data.data);
       if (data.type === 'command_result') {
-        addConsoleLine(`> ${data.command}`, 'cmd');
         if (data.data) addConsoleLine(data.data);
       }
       if (data.type === 'command_error') {
-        addConsoleLine(`> ${data.command}`, 'cmd');
         addConsoleLine(`Error: ${data.message}`, 'err');
       }
       if (data.type === 'error') addConsoleLine(`[Connection] ${data.message}`, 'err');
@@ -356,11 +354,11 @@
     const cmd = input.value.trim();
     if (!cmd) return;
     input.value = '';
+    addConsoleLine(`> ${cmd}`, 'cmd');
 
     if (consoleWs && consoleWs.readyState === WebSocket.OPEN) {
       consoleWs.send(JSON.stringify({ type: 'command', command: cmd }));
     } else {
-      addConsoleLine(`> ${cmd}`, 'cmd');
       api(`/servers/${selectedServerId}/command`, { method: 'POST', body: JSON.stringify({ command: cmd }) })
         .then((d) => { if (d.result) addConsoleLine(d.result); })
         .catch((e) => addConsoleLine(`Error: ${e.message}`, 'err'));
