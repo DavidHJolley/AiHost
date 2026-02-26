@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎮 Game Server Hosting</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- ── Header ─────────────────────────────────────────── -->
+    <header class="header">
+      <span class="header-logo">🎮</span>
+      <h1>Game Server Hosting</h1>
+      <span class="header-tag">AI-Powered</span>
+    </header>
+
+    <main class="main">
+
+      <!-- ── Left column: Chat ──────────────────────────────── -->
+      <section class="panel chat-panel">
+        <div class="panel-title">
+          <span>💬</span> AI Assistant
+        </div>
+
+        <!-- Chat history -->
+        <div class="chat-history" id="chat-history">
+          <div class="chat-message assistant">
+            <span class="chat-avatar">🤖</span>
+            <div class="chat-bubble">
+              Hi! I'm your AI game server manager.<br/>
+              Try: <em>"Create a Minecraft server with 4GB RAM called Survival"</em>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input row -->
+        <div class="chat-input-row">
+          <input
+            type="text"
+            id="chat-input"
+            class="chat-input"
+            placeholder='Create a Minecraft server with 4GB RAM…'
+            autocomplete="off"
+          />
+          <button id="chat-send" class="btn btn-primary">Send</button>
+        </div>
+      </section>
+
+      <!-- ── Right column: Server list ─────────────────────── -->
+      <section class="panel servers-panel">
+        <div class="panel-title">
+          <span>🖥️</span> Your Servers
+          <button class="btn btn-sm btn-ghost" id="refresh-btn" title="Refresh">⟳</button>
+        </div>
+
+        <div id="server-list" class="server-list">
+          <div class="empty-state" id="empty-state">
+            No servers yet.<br/>Use the chat to create one!
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ── Server card template ──────────────────────────────── -->
+  <template id="server-card-tpl">
+    <div class="server-card" data-id="">
+      <div class="server-card-header">
+        <span class="server-game-icon"></span>
+        <span class="server-name"></span>
+        <span class="server-status-badge"></span>
+      </div>
+      <div class="server-card-meta">
+        <span class="meta-item">🧠 <span class="server-ram"></span></span>
+        <span class="meta-item">🔌 Port <span class="server-port"></span></span>
+      </div>
+      <div class="server-card-actions">
+        <button class="btn btn-sm btn-start">▶ Start</button>
+        <button class="btn btn-sm btn-stop">⏹ Stop</button>
+        <button class="btn btn-sm btn-logs">📋 Logs</button>
+        <button class="btn btn-sm btn-danger btn-delete">🗑 Delete</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- ── Logs modal ────────────────────────────────────────── -->
+  <div class="modal-overlay hidden" id="logs-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="logs-modal-title">Server Logs</span>
+        <button class="btn btn-ghost btn-sm" id="logs-close">✕</button>
+      </div>
+      <pre class="logs-body" id="logs-body"></pre>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

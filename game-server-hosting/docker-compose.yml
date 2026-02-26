@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: game-hosting-app
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount servers directory so game containers share the same volume space
+      - ./servers:/app/servers
+      # Mount Docker socket so app can manage sibling containers
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - SERVERS_HOST_PATH=${PWD}/servers
+    restart: unless-stopped
+    networks:
+      - game-net
+
+networks:
+  game-net:
+    driver: bridge
