@@ -17,6 +17,7 @@
 
   let consoleWs = null;
   let consoleLineCount = 0;
+  let previewWs = null;
 
   let currentFilesPath = '';
   let openFilePath = null;
@@ -30,6 +31,7 @@
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
+  const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]|\u00a7[0-9a-fk-or]|\[3[0-9]m|\[0m/g, '');
 
   function escHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -69,6 +71,7 @@
 
   function navigate(view) {
     if (currentTab === 'console') disconnectConsole();
+    if (currentTab === 'overview') disconnectPreview();
     currentView = view;
 
     $$('.sidebar-menu .nav-item').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
@@ -103,6 +106,7 @@
   function switchTab(tab) {
     if (tab === currentTab) return;
     if (currentTab === 'console') disconnectConsole();
+    if (currentTab === 'overview') disconnectPreview();
     currentTab = tab;
 
     $$('.nav-tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
@@ -250,15 +254,17 @@
     if (s.status === 'running') {
       try {
         const d = await api(`/servers/${s.id}/command`, { method: 'POST', body: JSON.stringify({ command: 'list' }) });
-        $('#overview-players').textContent = d.success && d.result ? d.result.split('\n')[0] : '—';
+        $('#overview-players').textContent = d.success && d.result ? stripAnsi(d.result.split('\n')[0]) : '—';
       } catch { $('#overview-players').textContent = '—'; }
     } else {
       $('#overview-players').textContent = 'Server offline';
     }
 
     const body = $('#console-preview-body');
-    body.textContent = '';
-    if (s.container_id) {
+    body.innerHTML = '';
+    disconnectPreview();
+
+    if (s.container_id && s.status === 'running') {
       try {
         const d = await api(`/servers/${s.id}/logs?tail=20`);
         if (d.logs) {
@@ -266,7 +272,37 @@
           body.scrollTop = body.scrollHeight;
         }
       } catch {}
+      connectPreview(s.id, body);
+    } else {
+      body.innerHTML = '<span style="color:var(--text-muted)">Server is not running.</span>';
     }
+  }
+
+  function connectPreview(serverId, body) {
+    disconnectPreview();
+    previewWs = new WebSocket(WS_URL);
+    previewWs.onopen = () => {
+      previewWs.send(JSON.stringify({ type: 'subscribe', serverId }));
+    };
+    previewWs.onmessage = (ev) => {
+      let data;
+      try { data = JSON.parse(ev.data); } catch { return; }
+      if (data.type === 'log' && data.data) {
+        const div = document.createElement('div');
+        div.innerHTML = fmtLine(data.data);
+        body.appendChild(div);
+        while (body.children.length > 50) body.removeChild(body.firstChild);
+        body.scrollTop = body.scrollHeight;
+      }
+    };
+    previewWs.onclose = () => { previewWs = null; };
+    previewWs.onerror = () => {};
+  }
+
+  function disconnectPreview() {
+    if (!previewWs) return;
+    try { previewWs.send(JSON.stringify({ type: 'unsubscribe' })); previewWs.close(); } catch {}
+    previewWs = null;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -274,7 +310,7 @@
   // ═══════════════════════════════════════════════════════════════════════
 
   function fmtLine(line) {
-    let h = escHtml(line);
+    let h = escHtml(stripAnsi(line));
     h = h.replace(/\[(INFO|Info)\]/gi, '<span class="log-info">[Info]</span>');
     h = h.replace(/\[(WARN|Warning)\]/gi, '<span class="log-warn">[WARN]</span>');
     h = h.replace(/\[(ERROR|SEVERE)\]/gi, '<span class="log-error">[ERROR]</span>');
@@ -546,7 +582,7 @@
       const d = await api(`/servers/${s.id}/command`, { method: 'POST', body: JSON.stringify({ command: 'list' }) });
       if (!d.success) { el.innerHTML = `<div class="empty-state-sm">${d.error || 'Failed'}</div>`; return; }
 
-      const result = d.result || '';
+      const result = stripAnsi(d.result || '');
       const match = result.match(/There are (\d+) of a max of (\d+) players online/i);
 
       if (match) {
@@ -893,7 +929,7 @@
   $('#btn-delete').addEventListener('click', () => serverAction('delete'));
 
   // Console
-  $('#console-cmd').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendCmd($('#console-cmd')); });
+  $('#console-cmd').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendCmd($('#console-cmd')); } });
   $('#console-send').addEventListener('click', () => sendCmd($('#console-cmd')));
   $('#btn-console-clear').addEventListener('click', () => { $('#console-output').innerHTML = ''; consoleLineCount = 0; });
   $('#btn-console-reconnect').addEventListener('click', () => initConsole());
@@ -901,13 +937,33 @@
   // Overview console preview
   $('#console-preview-cmd').addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
+    e.preventDefault();
     const cmd = e.target.value.trim();
     if (!cmd || !selectedServerId) return;
     e.target.value = '';
+
+    const body = $('#console-preview-body');
+    const cmdDiv = document.createElement('div');
+    cmdDiv.className = 'console-line console-cmd';
+    cmdDiv.innerHTML = fmtLine(`> ${cmd}`);
+    body.appendChild(cmdDiv);
+    body.scrollTop = body.scrollHeight;
+
     try {
-      await api(`/servers/${selectedServerId}/command`, { method: 'POST', body: JSON.stringify({ command: cmd }) });
-      setTimeout(renderOverview, 500);
-    } catch {}
+      const d = await api(`/servers/${selectedServerId}/command`, { method: 'POST', body: JSON.stringify({ command: cmd }) });
+      const result = d.success && d.result ? stripAnsi(d.result) : (d.error || 'Failed');
+      const outDiv = document.createElement('div');
+      outDiv.className = 'console-line';
+      outDiv.innerHTML = fmtLine(result);
+      body.appendChild(outDiv);
+      body.scrollTop = body.scrollHeight;
+    } catch (err) {
+      const errDiv = document.createElement('div');
+      errDiv.className = 'console-line console-err';
+      errDiv.textContent = `Error: ${err.message}`;
+      body.appendChild(errDiv);
+      body.scrollTop = body.scrollHeight;
+    }
   });
   $('#btn-goto-console').addEventListener('click', () => switchTab('console'));
 

@@ -27,6 +27,10 @@ const GAME_PORTS = {
 
 const RCON_PASSWORD = 'gaming';
 
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\u00a7[0-9a-fk-or]/g;
+function stripAnsi(s) { return s.replace(ANSI_RE, ''); }
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function containerName(serverId) {
@@ -178,12 +182,9 @@ async function getContainerLogs(containerId, tail = 100) {
       tail,
       timestamps: false,
     });
-    // Docker log stream has 8-byte header per frame — strip it
-    return logs
-      .toString('utf8')
-      .split('\n')
-      .map((line) => (line.length > 8 ? line.slice(8) : line))
-      .join('\n');
+    const lines = logs.toString('utf8').split('\n').map((line) => (line.length > 8 ? line.slice(8) : line));
+    const filtered = lines.filter((l) => !/Thread RCON Client .* (started|shutting down)/.test(stripAnsi(l)));
+    return stripAnsi(filtered.join('\n'));
   } catch (err) {
     if (err.statusCode === 404) return '(container not found)';
     throw err;
@@ -236,12 +237,12 @@ async function execCommand(containerId, command) {
 
       docker.modem.demuxStream(stream, outStream, errStream);
 
-      stream.on('end', () => done((stdout + stderr).trim()));
+      stream.on('end', () => done(stripAnsi((stdout + stderr).trim())));
       stream.on('error', (e) => { if (!settled) { settled = true; reject(e); } });
 
       setTimeout(() => {
         try { stream.destroy(); } catch {}
-        done((stdout + stderr).trim());
+        done(stripAnsi((stdout + stderr).trim()));
       }, 8000);
     });
   });
@@ -269,7 +270,10 @@ async function streamContainerLogs(containerId, onData) {
     const lines = buffer.split('\n');
     buffer = lines.pop();
     for (const line of lines) {
-      if (line.trim()) onData(line);
+      const clean = stripAnsi(line);
+      if (!clean.trim()) continue;
+      if (/Thread RCON Client .* (started|shutting down)/.test(clean)) continue;
+      onData(clean);
     }
   }
 
