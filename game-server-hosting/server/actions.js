@@ -647,12 +647,17 @@ async function executeAction(action, ctx) {
 }
 
 /**
- * Execute a multi-step plan. Stops on first failure.
- * Returns { success, reply, results[] }.
+ * Execute a multi-step plan.
+ * Only stops on critical failures (create_server). Other failures are
+ * reported but the plan continues — e.g. one plugin install failing
+ * shouldn't block the rest.
  */
 async function executePlan(steps, ctx) {
   const results = [];
   const replies = [];
+  let hasFailure = false;
+
+  const CRITICAL_ACTIONS = new Set(['create_server']);
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
@@ -662,20 +667,24 @@ async function executePlan(steps, ctx) {
     results.push(result);
 
     if (result.success) {
-      replies.push(`${stepLabel}: ${result.reply}`);
+      replies.push(`✓ ${stepLabel}: ${result.reply}`);
     } else {
-      replies.push(`${stepLabel} FAILED: ${result.reply}`);
-      return {
-        success: false,
-        reply: replies.join('\n\n'),
-        results,
-        stoppedAtStep: i + 1,
-      };
+      hasFailure = true;
+      replies.push(`✗ ${stepLabel}: ${result.reply}`);
+
+      if (CRITICAL_ACTIONS.has(step.action)) {
+        return {
+          success: false,
+          reply: replies.join('\n\n'),
+          results,
+          stoppedAtStep: i + 1,
+        };
+      }
     }
   }
 
   return {
-    success: true,
+    success: !hasFailure,
     reply: replies.join('\n\n'),
     results,
   };

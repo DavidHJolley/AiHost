@@ -212,22 +212,25 @@ async function execCommand(containerId, command) {
     Cmd: ['rcon-cli', command],
     AttachStdout: true,
     AttachStderr: true,
+    Tty: true,
   });
 
   return new Promise((resolve, reject) => {
-    exec.start({}, (err, stream) => {
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; resolve(val); } };
+
+    exec.start({ Tty: true }, (err, stream) => {
       if (err) return reject(err);
       let output = '';
       stream.on('data', (chunk) => { output += chunk.toString('utf8'); });
-      stream.on('end', () => {
-        resolve(
-          output.split('\n')
-            .map(l => (l.length > 8 ? l.slice(8) : l))
-            .join('\n')
-            .trim()
-        );
-      });
-      stream.on('error', reject);
+      stream.on('end', () => done(output.trim()));
+      stream.on('error', (e) => { if (!settled) { settled = true; reject(e); } });
+
+      // Safety: rcon-cli should finish quickly; don't hang forever
+      setTimeout(() => {
+        try { stream.destroy(); } catch {}
+        done(output.trim());
+      }, 8000);
     });
   });
 }

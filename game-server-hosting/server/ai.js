@@ -29,7 +29,10 @@ You can do TWO things:
 1. CHAT — Answer questions, explain things, give advice using what you already know about the servers.
 2. ACT — Execute commands (create, modify, start, stop servers, etc.)
 
-CRITICAL RULE: If the user is asking a QUESTION that you can answer from the server state below, use "chat" to respond naturally. Do NOT dump raw data — answer like a helpful person would.
+CRITICAL RULES:
+- You MUST respond with ONLY a single valid JSON object. NEVER include text, explanations, or prose outside the JSON.
+- Do NOT describe what you are about to do. Just return the JSON action.
+- If the user is asking a QUESTION that you can answer from the server state below, use "chat" with a natural message inside the JSON.
 
 RULES:
 - ALWAYS respond with exactly ONE JSON object. No text before or after. Never output multiple JSON objects.
@@ -181,6 +184,9 @@ User: "Remove essentials from my server"
 User: "I want land claims and teleporting"
 {"action":"multi_step","steps":[{"action":"install_plugin","name":"minecraft-cace","query":"griefprevention land claims"},{"action":"install_plugin","name":"minecraft-cace","query":"essentials teleport homes"}]}
 
+User: "Install common plugins" or "Install the most popular plugins"
+{"action":"multi_step","steps":[{"action":"install_plugin","name":"minecraft-cace","slug":"essentialsx"},{"action":"install_plugin","name":"minecraft-cace","slug":"luckperms"},{"action":"install_plugin","name":"minecraft-cace","slug":"worldedit"}]}
+
 User: "Create a Minecraft server called Survival with 4GB and I want a teleport plugin"
 {"action":"multi_step","steps":[{"action":"create_server","name":"Survival","game":"minecraft","ram":"4G","server_type":"paper","properties":{}},{"action":"install_plugin","name":"Survival","query":"essentials teleport homes"}]}
 
@@ -323,32 +329,45 @@ async function parseMessage(userMessage, history = [], serverContext = '') {
     { role: 'user', content: userMessage },
   ];
 
-  try {
+  const callGroq = async (msgs, attempt = 1) => {
     const response = await axios.post(
       GROQ_API_URL,
       {
         model: MODEL,
-        max_tokens: 512,
-        temperature: 0.1,
-        messages,
+        max_tokens: 1024,
+        temperature: 0.05,
+        response_format: { type: 'json_object' },
+        messages: msgs,
       },
       {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 15000,
+        timeout: 20000,
       }
     );
 
     const text = response.data.choices[0].message.content.trim();
     const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-
     const parsed = parseAIResponse(cleaned);
+
+    if (!parsed && attempt < 2) {
+      console.log('[AI] Non-JSON response, retrying...');
+      const retry = [...msgs, { role: 'assistant', content: text }, { role: 'user', content: 'Respond ONLY with a valid JSON object. No prose.' }];
+      return callGroq(retry, attempt + 1);
+    }
+
+    return parsed;
+  };
+
+  try {
+    const parsed = await callGroq(messages);
+
     if (!parsed) {
       return {
         action: 'unknown',
-        message: `AI returned non-JSON: ${text.slice(0, 200)}`,
+        message: 'I had trouble understanding that. Could you rephrase?',
       };
     }
 

@@ -18,7 +18,7 @@ const USER_AGENT = 'AiHost/1.0 (game-server-hosting)';
 const api = axios.create({
   baseURL: MODRINTH_API,
   headers: { 'User-Agent': USER_AGENT },
-  timeout: 15000,
+  timeout: 30000,
 });
 
 // ─── Filesystem helpers ────────────────────────────────────────────────────────

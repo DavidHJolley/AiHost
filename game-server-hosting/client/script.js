@@ -669,45 +669,192 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // Create server modal
+  // Create server wizard
   // ═══════════════════════════════════════════════════════════════════════
 
+  let wzStep = 1;
+  let wzType = 'paper';
+
   function showCreateModal() {
+    wzStep = 1;
+    wzType = 'paper';
     $('#create-modal').classList.remove('hidden');
-    $('#create-name').value = '';
-    setTimeout(() => $('#create-name').focus(), 50);
+    $('#wz-name').value = '';
+    $$('.type-card').forEach((c) => c.classList.toggle('selected', c.dataset.type === 'paper'));
+    $('#wz-ram').value = '2G';
+    $('#wz-maxplayers').value = '20';
+    $('#wz-difficulty').value = 'normal';
+    $('#wz-gamemode').value = 'survival';
+    $$('#wz-plugins input[type="checkbox"]').forEach((cb) => {
+      cb.checked = cb.value === 'essentialsx' || cb.value === 'vault';
+    });
+    $('#creation-log').innerHTML = '';
+    $('#wizard-footer').style.display = '';
+    $('#wizard-steps').style.display = '';
+    updateWizard();
+    setTimeout(() => $('#wz-name').focus(), 50);
   }
 
   function hideCreateModal() {
     $('#create-modal').classList.add('hidden');
   }
 
-  async function createServer() {
-    const name = $('#create-name').value.trim();
-    const game = $('#create-game').value;
-    const server_type = $('#create-type').value;
-    const ram = $('#create-ram').value;
-    if (!name) { alert('Server name is required'); return; }
+  function updateWizard() {
+    $$('.wz-pane').forEach((el) => el.classList.add('hidden'));
+    const pane = $(`#wz-${wzStep}`);
+    if (pane) pane.classList.remove('hidden');
 
-    const btn = $('#create-submit');
-    btn.disabled = true;
-    btn.textContent = 'Creating...';
+    $$('.wz-step').forEach((el) => {
+      const s = parseInt(el.dataset.s);
+      el.classList.remove('active', 'done');
+      if (s === wzStep) el.classList.add('active');
+      else if (s < wzStep) el.classList.add('done');
+    });
 
-    try {
-      const d = await api('/servers/create', { method: 'POST', body: JSON.stringify({ name, game, server_type, ram }) });
-      if (d.success) {
-        hideCreateModal();
-        await loadServers();
-        if (d.server) selectServer(d.server.id);
-      } else {
-        alert(d.error || 'Failed to create server');
-      }
-    } catch (err) {
-      alert(`Error: ${err.message}`);
+    $('#wz-back').style.display = wzStep > 1 ? '' : 'none';
+
+    const isLast = wzStep === 4 || (wzStep === 3 && wzType === 'vanilla');
+    $('#wz-next').textContent = isLast ? '🚀 Create Server' : 'Next →';
+
+    const pluginTab = document.querySelector('.wz-step[data-s="4"]');
+    if (pluginTab) pluginTab.style.display = wzType === 'vanilla' ? 'none' : '';
+  }
+
+  function wizardNext() {
+    if (wzStep === 1) {
+      if (!$('#wz-name').value.trim()) { $('#wz-name').focus(); return; }
+      wzStep = 2;
+    } else if (wzStep === 2) {
+      wzStep = 3;
+    } else if (wzStep === 3) {
+      if (wzType === 'vanilla') { startCreation(); return; }
+      wzStep = 4;
+    } else if (wzStep === 4) {
+      startCreation();
+      return;
+    }
+    updateWizard();
+  }
+
+  function wizardBack() {
+    if (wzStep === 4) wzStep = 3;
+    else if (wzStep === 3) wzStep = 2;
+    else if (wzStep === 2) wzStep = 1;
+    updateWizard();
+  }
+
+  function logItem(text, status = 'pending') {
+    const el = document.createElement('div');
+    el.className = `clog-item ${status}`;
+    const icons = { pending: '○', active: '⟳', done: '✓', failed: '✗' };
+    el.innerHTML = `<span class="clog-icon">${icons[status] || '○'}</span><span>${text}</span>`;
+    $('#creation-log').appendChild(el);
+    return el;
+  }
+
+  function logUpdate(el, status, text) {
+    const icons = { pending: '○', active: '⟳', done: '✓', failed: '✗' };
+    el.className = `clog-item ${status}`;
+    if (text) el.querySelector('span:last-child').textContent = text;
+    el.querySelector('.clog-icon').textContent = icons[status] || '○';
+  }
+
+  async function startCreation() {
+    $$('.wz-pane').forEach((el) => el.classList.add('hidden'));
+    $('#wz-progress').classList.remove('hidden');
+    $('#wizard-footer').style.display = 'none';
+    $('#wizard-steps').style.display = 'none';
+    $('#creation-log').innerHTML = '';
+
+    const name = $('#wz-name').value.trim();
+    const ram = $('#wz-ram').value;
+    const properties = {
+      MAX_PLAYERS: $('#wz-maxplayers').value,
+      DIFFICULTY: $('#wz-difficulty').value,
+      GAMEMODE: $('#wz-gamemode').value,
+    };
+
+    const selectedPlugins = [];
+    if (wzType !== 'vanilla') {
+      $$('#wz-plugins input[type="checkbox"]:checked').forEach((cb) => selectedPlugins.push(cb.value));
     }
 
-    btn.disabled = false;
-    btn.textContent = 'Create Server';
+    // Step 1: Create server
+    const createEl = logItem(`Creating server "${name}"...`, 'active');
+    let serverId = null;
+
+    try {
+      const d = await api('/servers/create', {
+        method: 'POST',
+        body: JSON.stringify({ name, game: 'minecraft', server_type: wzType, ram, properties }),
+      });
+      if (d.success && d.server) {
+        serverId = d.server.id;
+        logUpdate(createEl, 'done', `Server "${name}" created on port ${d.server.port}`);
+      } else {
+        logUpdate(createEl, 'failed', `Failed: ${d.error || 'Unknown error'}`);
+        addDoneButtons(null);
+        return;
+      }
+    } catch (err) {
+      logUpdate(createEl, 'failed', `Error: ${err.message}`);
+      addDoneButtons(null);
+      return;
+    }
+
+    // Step 2: Install plugins
+    for (const slug of selectedPlugins) {
+      const el = logItem(`Installing ${slug}...`, 'active');
+      try {
+        const d = await api(`/servers/${serverId}/plugins/install`, {
+          method: 'POST',
+          body: JSON.stringify({ slug }),
+        });
+        if (d.success && d.plugin) {
+          const p = d.plugin;
+          logUpdate(el, p.alreadyInstalled ? 'done' : 'done', `${p.title || slug}${p.version ? ' v' + p.version : ''} installed`);
+        } else {
+          logUpdate(el, 'failed', `${slug}: ${d.error || 'Failed'}`);
+        }
+      } catch (err) {
+        logUpdate(el, 'failed', `${slug}: ${err.message}`);
+      }
+    }
+
+    // Step 3: Restart to load plugins
+    if (selectedPlugins.length > 0 && serverId) {
+      const el = logItem('Restarting to load plugins...', 'active');
+      try {
+        await api(`/servers/${serverId}/restart`, { method: 'POST' });
+        logUpdate(el, 'done', 'Server restarted with plugins');
+      } catch {
+        logUpdate(el, 'failed', 'Restart failed — restart manually');
+      }
+    }
+
+    await loadServers();
+    addDoneButtons(serverId);
+  }
+
+  function addDoneButtons(serverId) {
+    const div = document.createElement('div');
+    div.style.cssText = 'margin-top: 18px; display: flex; gap: 8px;';
+
+    if (serverId) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary btn-sm';
+      btn.textContent = 'Manage Server →';
+      btn.addEventListener('click', () => { hideCreateModal(); selectServer(serverId); });
+      div.appendChild(btn);
+    }
+
+    const close = document.createElement('button');
+    close.className = 'btn btn-ghost btn-sm';
+    close.textContent = 'Close';
+    close.addEventListener('click', hideCreateModal);
+    div.appendChild(close);
+
+    $('#creation-log').appendChild(div);
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -789,10 +936,20 @@
   $('#btn-new-server').addEventListener('click', showCreateModal);
   $('#btn-new-server-2').addEventListener('click', showCreateModal);
   $('#create-modal-close').addEventListener('click', hideCreateModal);
-  $('#create-cancel').addEventListener('click', hideCreateModal);
-  $('#create-submit').addEventListener('click', createServer);
+  $('#wz-cancel').addEventListener('click', hideCreateModal);
+  $('#wz-next').addEventListener('click', wizardNext);
+  $('#wz-back').addEventListener('click', wizardBack);
   $('#create-modal').addEventListener('click', (e) => { if (e.target === $('#create-modal')) hideCreateModal(); });
-  $('#create-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') createServer(); });
+  $('#wz-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') wizardNext(); });
+
+  $$('.type-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      $$('.type-card').forEach((c) => c.classList.remove('selected'));
+      card.classList.add('selected');
+      wzType = card.dataset.type;
+      updateWizard();
+    });
+  });
 
   // Global
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCreateModal(); });

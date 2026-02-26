@@ -308,6 +308,33 @@ app.post('/servers/:id/files/delete', asyncHandler(async (req, res) => {
   ok(res, { message: 'Deleted' });
 }));
 
+// ─── Plugin management ────────────────────────────────────────────────────────
+
+const plugins = require('./plugins');
+
+app.get('/servers/:id/plugins', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const installed = plugins.listInstalledPlugins(SERVERS_PATH, server.id);
+  ok(res, { plugins: installed });
+}));
+
+app.post('/servers/:id/plugins/install', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { slug, query } = req.body;
+  if (!slug && !query) return fail(res, 'slug or query is required');
+
+  try {
+    const result = await plugins.installPlugin(SERVERS_PATH, server.id, { slug, query });
+    ok(res, { plugin: result });
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
 // ─── Server config ────────────────────────────────────────────────────────────
 
 app.get('/servers/:id/configs', asyncHandler(async (req, res) => {

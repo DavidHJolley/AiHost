@@ -232,48 +232,141 @@
     </main>
   </div>
 
-  <!-- ═══ Create Server Modal ═════════════════════════════════════════════ -->
+  <!-- ═══ Create Server Wizard ══════════════════════════════════════════ -->
   <div class="modal-overlay hidden" id="create-modal">
-    <div class="modal">
+    <div class="modal modal-wizard">
       <div class="modal-header">
         <h3>Create New Server</h3>
         <button class="btn btn-ghost btn-xs" id="create-modal-close">✕</button>
       </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="create-name">Server Name</label>
-          <input type="text" id="create-name" placeholder="My Minecraft Server" autocomplete="off" />
-        </div>
-        <div class="form-row">
+
+      <div class="wizard-steps" id="wizard-steps">
+        <div class="wz-step active" data-s="1"><span class="wz-num">1</span> Basics</div>
+        <div class="wz-step" data-s="2"><span class="wz-num">2</span> Software</div>
+        <div class="wz-step" data-s="3"><span class="wz-num">3</span> Settings</div>
+        <div class="wz-step" data-s="4"><span class="wz-num">4</span> Plugins</div>
+      </div>
+
+      <!-- Step 1: Basics -->
+      <div class="wz-pane" id="wz-1">
+        <div class="modal-body">
           <div class="form-group">
-            <label for="create-game">Game</label>
-            <select id="create-game">
-              <option value="minecraft">Minecraft</option>
-            </select>
+            <label for="wz-name">Server Name</label>
+            <input type="text" id="wz-name" placeholder="My Minecraft Server" autocomplete="off" />
+            <div class="form-hint">Choose a memorable name for your server</div>
           </div>
-          <div class="form-group">
-            <label for="create-type">Server Type</label>
-            <select id="create-type">
-              <option value="vanilla">Vanilla</option>
-              <option value="paper" selected>Paper</option>
-              <option value="spigot">Spigot</option>
-              <option value="purpur">Purpur</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label for="create-ram">RAM</label>
-          <select id="create-ram">
-            <option value="1G">1 GB</option>
-            <option value="2G" selected>2 GB</option>
-            <option value="4G">4 GB</option>
-            <option value="8G">8 GB</option>
-          </select>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" id="create-cancel">Cancel</button>
-        <button class="btn btn-primary" id="create-submit">Create Server</button>
+
+      <!-- Step 2: Server Software -->
+      <div class="wz-pane hidden" id="wz-2">
+        <div class="modal-body">
+          <div class="type-grid">
+            <button class="type-card selected" data-type="paper" type="button">
+              <div class="type-icon">📄</div>
+              <div class="type-name">Paper</div>
+              <div class="type-desc">High performance. Plugin support.</div>
+              <span class="type-rec">Recommended</span>
+            </button>
+            <button class="type-card" data-type="vanilla" type="button">
+              <div class="type-icon">🟩</div>
+              <div class="type-name">Vanilla</div>
+              <div class="type-desc">Official server. No plugins.</div>
+            </button>
+            <button class="type-card" data-type="spigot" type="button">
+              <div class="type-icon">🔧</div>
+              <div class="type-name">Spigot</div>
+              <div class="type-desc">Classic modded. Plugin support.</div>
+            </button>
+            <button class="type-card" data-type="purpur" type="button">
+              <div class="type-icon">🟣</div>
+              <div class="type-name">Purpur</div>
+              <div class="type-desc">Paper fork. Extra config options.</div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3: Settings -->
+      <div class="wz-pane hidden" id="wz-3">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="wz-ram">RAM</label>
+              <select id="wz-ram">
+                <option value="1G">1 GB</option>
+                <option value="2G" selected>2 GB</option>
+                <option value="4G">4 GB</option>
+                <option value="8G">8 GB</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="wz-maxplayers">Max Players</label>
+              <select id="wz-maxplayers">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="wz-difficulty">Difficulty</label>
+              <select id="wz-difficulty">
+                <option value="peaceful">Peaceful</option>
+                <option value="easy">Easy</option>
+                <option value="normal" selected>Normal</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="wz-gamemode">Gamemode</label>
+              <select id="wz-gamemode">
+                <option value="survival" selected>Survival</option>
+                <option value="creative">Creative</option>
+                <option value="adventure">Adventure</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4: Plugins -->
+      <div class="wz-pane hidden" id="wz-4">
+        <div class="modal-body">
+          <p class="wz-hint">Select plugins to pre-install. You can add more later via the AI assistant.</p>
+          <div class="plugin-grid" id="wz-plugins">
+            <label class="plugin-opt"><input type="checkbox" value="essentialsx" checked />
+              <div class="plugin-opt-body"><strong>EssentialsX</strong><span>Teleport, homes, kits, warps &amp; economy</span></div></label>
+            <label class="plugin-opt"><input type="checkbox" value="vault" checked />
+              <div class="plugin-opt-body"><strong>Vault</strong><span>Economy &amp; permissions API (needed by many plugins)</span></div></label>
+            <label class="plugin-opt"><input type="checkbox" value="luckperms" />
+              <div class="plugin-opt-body"><strong>LuckPerms</strong><span>Advanced permissions &amp; rank management</span></div></label>
+            <label class="plugin-opt"><input type="checkbox" value="worldedit" />
+              <div class="plugin-opt-body"><strong>WorldEdit</strong><span>In-game map editor &amp; building tools</span></div></label>
+            <label class="plugin-opt"><input type="checkbox" value="worldguard" />
+              <div class="plugin-opt-body"><strong>WorldGuard</strong><span>Region protection &amp; area flags</span></div></label>
+            <label class="plugin-opt"><input type="checkbox" value="coreprotect" />
+              <div class="plugin-opt-body"><strong>CoreProtect</strong><span>Block logging, rollback &amp; restore</span></div></label>
+            <label class="plugin-opt"><input type="checkbox" value="griefprevention" />
+              <div class="plugin-opt-body"><strong>GriefPrevention</strong><span>Land claims &amp; anti-grief protection</span></div></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress step -->
+      <div class="wz-pane hidden" id="wz-progress">
+        <div class="modal-body">
+          <div class="creation-log" id="creation-log"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer" id="wizard-footer">
+        <button class="btn btn-ghost" id="wz-back" style="display:none">← Back</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="wz-cancel">Cancel</button>
+        <button class="btn btn-primary" id="wz-next">Next →</button>
       </div>
     </div>
   </div>
