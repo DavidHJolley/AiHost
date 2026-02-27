@@ -66,31 +66,34 @@ function buildEnvVars(game, ram, extra = {}, serverType = 'vanilla') {
     env.RCON_PASSWORD = RCON_PASSWORD;
     if (extra.SERVER_PORT) env.SERVER_PORT = extra.SERVER_PORT;
 
-    const type = (serverType || 'vanilla').toLowerCase();
-
-    if (type === 'vanilla') {
-      env.TYPE = 'VANILLA';
-    } else if (type === 'paper') {
-      env.TYPE = 'PAPER';
-    } else if (type === 'spigot') {
-      env.TYPE = 'SPIGOT';
-    } else if (type === 'purpur') {
-      env.TYPE = 'PURPUR';
-    } else if (type === 'fabric') {
-      env.TYPE = 'FABRIC';
-    } else if (type === 'forge') {
-      env.TYPE = 'FORGE';
-    } else if (type === 'quilt') {
-      env.TYPE = 'QUILT';
-    } else if (type === 'neoforge') {
-      env.TYPE = 'NEOFORGE';
-    } else {
-      env.TYPE = type.toUpperCase();
-    }
-
-    // Modpack support — pass modpack slug/id as env var for itzg image auto-install
+    // When MODRINTH_MODPACK is set, use TYPE=MODRINTH so the itzg image
+    // downloads and installs the .mrpack (mods, configs, etc.) on first start.
+    // Using TYPE=FABRIC/FORGE instead would boot a plain loader server and
+    // ignore the modpack entirely.
     if (extra.MODRINTH_MODPACK) {
-      env.MODRINTH_MODPACK = extra.MODRINTH_MODPACK;
+      env.TYPE = 'MODRINTH';
+    } else {
+      const type = (serverType || 'vanilla').toLowerCase();
+
+      if (type === 'vanilla') {
+        env.TYPE = 'VANILLA';
+      } else if (type === 'paper') {
+        env.TYPE = 'PAPER';
+      } else if (type === 'spigot') {
+        env.TYPE = 'SPIGOT';
+      } else if (type === 'purpur') {
+        env.TYPE = 'PURPUR';
+      } else if (type === 'fabric') {
+        env.TYPE = 'FABRIC';
+      } else if (type === 'forge') {
+        env.TYPE = 'FORGE';
+      } else if (type === 'quilt') {
+        env.TYPE = 'QUILT';
+      } else if (type === 'neoforge') {
+        env.TYPE = 'NEOFORGE';
+      } else {
+        env.TYPE = type.toUpperCase();
+      }
     }
   }
 

@@ -303,7 +303,10 @@ const executors = {
 
     try {
       if (!server.container_id) {
-        const containerId = await ctx.docker.createContainer(server);
+        // Re-apply MODRINTH_MODPACK if this server has a modpack installed
+        const modpackConfig = modpacks.loadModpackConfig(ctx.serversPath, server.id);
+        const extra = modpackConfig ? { MODRINTH_MODPACK: modpackConfig.slug } : {};
+        const containerId = await ctx.docker.createContainer(server, extra);
         ctx.db.updateServerStatus(server.id, 'starting', containerId);
         await ctx.docker.startContainer(containerId);
       } else {

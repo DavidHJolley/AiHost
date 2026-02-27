@@ -510,7 +510,10 @@ app.post('/servers/:id/start', asyncHandler(async (req, res) => {
 
   try {
     if (!server.container_id) {
-      const containerId = await docker.createContainer(server);
+      // Re-apply MODRINTH_MODPACK if this server has a modpack installed
+      const modpackConfig = modpacksModule.loadModpackConfig(SERVERS_PATH, server.id);
+      const extra = modpackConfig ? { MODRINTH_MODPACK: modpackConfig.slug } : {};
+      const containerId = await docker.createContainer(server, extra);
       db.updateServerStatus(server.id, 'starting', containerId);
       await docker.startContainer(containerId);
     } else {
