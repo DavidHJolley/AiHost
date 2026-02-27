@@ -456,12 +456,16 @@ app.post('/servers/:id/modpack/install', asyncHandler(async (req, res) => {
     slug: packDetails.slug,
     title: packDetails.title,
     loader: packLoader,
+    sourceUrl: modpackSource,
     installedAt: new Date().toISOString(),
   });
 
+  // Resolve the best server-side source (dedicated server pack zip or primary .mrpack)
+  const modpackSource = await modpacksModule.resolveServerPackSource(packDetails.slug);
+
   try {
     const updatedServer = db.getServerById(server.id);
-    const extra = { MODRINTH_MODPACK: packDetails.slug };
+    const extra = { MODRINTH_MODPACK: modpackSource };
     const containerId = await docker.createContainer(updatedServer, extra);
     db.updateServerStatus(server.id, 'starting', containerId);
     await docker.startContainer(containerId);
@@ -510,9 +514,15 @@ app.post('/servers/:id/start', asyncHandler(async (req, res) => {
 
   try {
     if (!server.container_id) {
-      // Re-apply MODRINTH_MODPACK if this server has a modpack installed
+      // Re-apply MODRINTH_MODPACK if this server has a modpack installed.
+      // Use the stored source URL if available, else re-resolve from the slug.
       const modpackConfig = modpacksModule.loadModpackConfig(SERVERS_PATH, server.id);
-      const extra = modpackConfig ? { MODRINTH_MODPACK: modpackConfig.slug } : {};
+      let modpackSource = null;
+      if (modpackConfig) {
+        modpackSource = modpackConfig.sourceUrl
+          || await modpacksModule.resolveServerPackSource(modpackConfig.slug);
+      }
+      const extra = modpackSource ? { MODRINTH_MODPACK: modpackSource } : {};
       const containerId = await docker.createContainer(server, extra);
       db.updateServerStatus(server.id, 'starting', containerId);
       await docker.startContainer(containerId);

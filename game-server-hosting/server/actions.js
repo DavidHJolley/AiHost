@@ -303,9 +303,15 @@ const executors = {
 
     try {
       if (!server.container_id) {
-        // Re-apply MODRINTH_MODPACK if this server has a modpack installed
+        // Re-apply MODRINTH_MODPACK if this server has a modpack installed.
+        // Use the stored source URL if available (preferred server pack), else re-resolve.
         const modpackConfig = modpacks.loadModpackConfig(ctx.serversPath, server.id);
-        const extra = modpackConfig ? { MODRINTH_MODPACK: modpackConfig.slug } : {};
+        let modpackSource = null;
+        if (modpackConfig) {
+          modpackSource = modpackConfig.sourceUrl
+            || await modpacks.resolveServerPackSource(modpackConfig.slug);
+        }
+        const extra = modpackSource ? { MODRINTH_MODPACK: modpackSource } : {};
         const containerId = await ctx.docker.createContainer(server, extra);
         ctx.db.updateServerStatus(server.id, 'starting', containerId);
         await ctx.docker.startContainer(containerId);
@@ -868,18 +874,22 @@ const executors = {
     ctx.db.updateServerType(server.id, packLoader);
     ctx.db.updateServerStatus(server.id, 'stopped', null);
 
-    // Save modpack config
+    // Save modpack config (including resolved source URL for fast restarts)
     modpacks.saveModpackConfig(ctx.serversPath, server.id, {
       slug: packDetails.slug,
       title: packDetails.title,
       loader: packLoader,
+      sourceUrl: modpackSource,
       installedAt: new Date().toISOString(),
     });
+
+    // Resolve the best server-side source URL (dedicated server pack or primary .mrpack)
+    const modpackSource = await modpacks.resolveServerPackSource(packDetails.slug);
 
     // Recreate container with MODRINTH_MODPACK env var
     try {
       const updatedServer = ctx.db.getServerById(server.id);
-      const extra = { MODRINTH_MODPACK: packDetails.slug };
+      const extra = { MODRINTH_MODPACK: modpackSource };
       const containerId = await ctx.docker.createContainer(updatedServer, extra);
       ctx.db.updateServerStatus(server.id, 'starting', containerId);
       await ctx.docker.startContainer(containerId);

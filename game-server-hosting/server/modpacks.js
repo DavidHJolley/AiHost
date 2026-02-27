@@ -43,7 +43,13 @@ const api = axios.create({
 async function browseModpacks(options = {}) {
   const { query = '', sort = 'downloads', limit = 12, offset = 0, loader = null, gameVersion = null } = options;
 
-  const facets = [['project_type:modpack']];
+  // Only show modpacks that can run on a server (exclude client-only packs like
+  // shader/resource pack bundles).  The OR condition inside one facet array means
+  // "server_side is required OR optional" — both are fine for a dedicated server.
+  const facets = [
+    ['project_type:modpack'],
+    ['server_side:required', 'server_side:optional'],
+  ];
   if (loader) facets.push([`categories:${loader}`]);
   if (gameVersion) facets.push([`versions:${gameVersion}`]);
 
@@ -114,6 +120,51 @@ async function getLatestModpackVersion(projectIdOrSlug) {
   return stable || versions[0];
 }
 
+// ─── Server pack resolution ───────────────────────────────────────────────────
+
+/**
+ * Resolve the best source to pass as MODRINTH_MODPACK to the itzg container.
+ *
+ * Priority:
+ *   1. A dedicated server pack .zip file in the version's files list
+ *      (many modpack authors ship a separate server bundle alongside the .mrpack)
+ *   2. A direct URL to the primary .mrpack file — itzg/mc-image-helper will
+ *      read modrinth.index.json and skip any file where env.server = "unsupported",
+ *      so only server-compatible mods are installed.
+ *   3. The slug as a last resort (itzg fetches latest version automatically)
+ *
+ * @param {string} projectIdOrSlug
+ * @returns {Promise<string>} URL or slug to assign to MODRINTH_MODPACK
+ */
+async function resolveServerPackSource(projectIdOrSlug) {
+  let versions;
+  try {
+    const res = await api.get(`/project/${projectIdOrSlug}/version`);
+    versions = res.data;
+  } catch {
+    return projectIdOrSlug; // API error — fall back to slug
+  }
+
+  if (!versions.length) return projectIdOrSlug;
+
+  // Prefer a stable release; fall back to the newest version
+  const version = versions.find((v) => v.version_type === 'release') || versions[0];
+  const files = version.files || [];
+
+  // 1. Dedicated server pack: non-.mrpack file with "server" in the name
+  const serverZip = files.find(
+    (f) => !f.filename.endsWith('.mrpack') && /server/i.test(f.filename)
+  );
+  if (serverZip) return serverZip.url;
+
+  // 2. Primary .mrpack — itzg filters client-only mods via modrinth.index.json
+  const primary = files.find((f) => f.primary) || files.find((f) => f.filename.endsWith('.mrpack'));
+  if (primary) return primary.url;
+
+  // 3. Fallback: slug (itzg resolves it automatically)
+  return projectIdOrSlug;
+}
+
 // ─── Modpack config persistence ────────────────────────────────────────────────
 
 /**
@@ -146,6 +197,7 @@ module.exports = {
   browseModpacks,
   getModpackDetails,
   getLatestModpackVersion,
+  resolveServerPackSource,
   saveModpackConfig,
   loadModpackConfig,
   removeModpackConfig,
