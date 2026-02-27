@@ -452,6 +452,9 @@ app.post('/servers/:id/modpack/install', asyncHandler(async (req, res) => {
   db.updateServerType(server.id, packLoader);
   db.updateServerStatus(server.id, 'stopped', null);
 
+  // Resolve the best server-side source (dedicated server pack zip or primary .mrpack)
+  const modpackSource = await modpacksModule.resolveServerPackSource(packDetails.slug);
+
   modpacksModule.saveModpackConfig(SERVERS_PATH, server.id, {
     slug: packDetails.slug,
     title: packDetails.title,
@@ -459,9 +462,6 @@ app.post('/servers/:id/modpack/install', asyncHandler(async (req, res) => {
     sourceUrl: modpackSource,
     installedAt: new Date().toISOString(),
   });
-
-  // Resolve the best server-side source (dedicated server pack zip or primary .mrpack)
-  const modpackSource = await modpacksModule.resolveServerPackSource(packDetails.slug);
 
   try {
     const updatedServer = db.getServerById(server.id);

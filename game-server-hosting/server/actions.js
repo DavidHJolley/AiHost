@@ -874,6 +874,9 @@ const executors = {
     ctx.db.updateServerType(server.id, packLoader);
     ctx.db.updateServerStatus(server.id, 'stopped', null);
 
+    // Resolve the best server-side source URL (dedicated server pack or primary .mrpack)
+    const modpackSource = await modpacks.resolveServerPackSource(packDetails.slug);
+
     // Save modpack config (including resolved source URL for fast restarts)
     modpacks.saveModpackConfig(ctx.serversPath, server.id, {
       slug: packDetails.slug,
@@ -882,9 +885,6 @@ const executors = {
       sourceUrl: modpackSource,
       installedAt: new Date().toISOString(),
     });
-
-    // Resolve the best server-side source URL (dedicated server pack or primary .mrpack)
-    const modpackSource = await modpacks.resolveServerPackSource(packDetails.slug);
 
     // Recreate container with MODRINTH_MODPACK env var
     try {
