@@ -26,6 +26,10 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
           <span>My Servers</span>
         </button>
+        <button class="nav-item" data-view="modpacks" id="nav-modpacks">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <span>Modpacks</span>
+        </button>
         <button class="nav-item" data-view="ai" id="nav-ai">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><path d="M10 21v1h4v-1"/></svg>
           <span>AI Assistant</span>
@@ -43,6 +47,10 @@
         <button class="nav-tab" data-tab="console">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           <span>Console</span>
+        </button>
+        <button class="nav-tab" data-tab="mods">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          <span>Mods</span>
         </button>
         <button class="nav-tab" data-tab="files">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -103,6 +111,55 @@
           </div>
         </div>
 
+        <!-- ─── Modpack browser view ─────────────────────────────── -->
+        <div class="view hidden" id="view-modpacks">
+          <div class="view-header">
+            <h2>Modpack Browser</h2>
+            <span class="view-header-sub">Browse and install Modrinth modpacks</span>
+          </div>
+
+          <div class="modpack-toolbar">
+            <div class="modpack-search-row">
+              <input type="text" id="modpack-search" placeholder="Search modpacks..." autocomplete="off" />
+              <button class="btn btn-primary btn-sm" id="btn-modpack-search">Search</button>
+            </div>
+            <div class="modpack-filters">
+              <div class="filter-group">
+                <span class="filter-label">Sort by</span>
+                <div class="filter-pills" id="modpack-sort-pills">
+                  <button class="filter-pill active" data-sort="downloads">🔥 Popular</button>
+                  <button class="filter-pill" data-sort="follows">❤️ Followed</button>
+                  <button class="filter-pill" data-sort="newest">✨ Newest</button>
+                  <button class="filter-pill" data-sort="updated">🔄 Updated</button>
+                </div>
+              </div>
+              <div class="filter-group">
+                <span class="filter-label">Loader</span>
+                <div class="filter-pills" id="modpack-loader-pills">
+                  <button class="filter-pill active" data-loader="">All</button>
+                  <button class="filter-pill" data-loader="fabric">Fabric</button>
+                  <button class="filter-pill" data-loader="forge">Forge</button>
+                  <button class="filter-pill" data-loader="quilt">Quilt</button>
+                  <button class="filter-pill" data-loader="neoforge">NeoForge</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modpack-grid" id="modpack-grid">
+            <div class="empty-state">
+              <div class="empty-icon">📦</div>
+              <h3>Loading modpacks...</h3>
+            </div>
+          </div>
+
+          <div class="modpack-pagination" id="modpack-pagination" style="display:none">
+            <button class="btn btn-ghost btn-sm" id="btn-modpack-prev">← Prev</button>
+            <span id="modpack-page-info">Page 1</span>
+            <button class="btn btn-ghost btn-sm" id="btn-modpack-next">Next →</button>
+          </div>
+        </div>
+
         <!-- ─── AI Assistant view ────────────────────────────────── -->
         <div class="view hidden" id="view-ai">
           <div class="chat-container">
@@ -111,7 +168,7 @@
                 <div class="chat-avatar">🤖</div>
                 <div class="chat-bubble">
                   Hi! I'm your AI game server manager.<br>
-                  Try: <em>"Create a Minecraft server with 4GB RAM called Survival"</em>
+                  Try: <em>"Create a Fabric server with the Create mod"</em> or <em>"I want a server like Hermitcraft"</em>
                 </div>
               </div>
             </div>
@@ -143,6 +200,7 @@
                   <div class="info-row"><span>RAM</span><span id="overview-ram">—</span></div>
                   <div class="info-row"><span>Server Type</span><span id="overview-type">—</span></div>
                   <div class="info-row"><span>IP Address</span><span id="overview-ip">—</span></div>
+                  <div class="info-row" id="overview-modpack-row" style="display:none"><span>Modpack</span><span id="overview-modpack">—</span></div>
                 </div>
               </div>
 
@@ -173,6 +231,52 @@
                 <span class="prompt">›</span>
                 <input type="text" id="console-cmd" placeholder="Type a server command..." autocomplete="off" />
                 <button class="btn btn-primary btn-sm" id="console-send">Send</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mods tab -->
+          <div class="tab-pane hidden" id="tab-mods">
+            <div class="mods-layout">
+              <!-- Left: installed mods/plugins -->
+              <div class="mods-installed-panel">
+                <div class="card">
+                  <div class="card-header">
+                    <span id="mods-panel-title">Installed Mods</span>
+                    <button class="btn btn-ghost btn-xs" id="btn-refresh-mods">↻ Refresh</button>
+                  </div>
+                  <div class="card-body" id="mods-installed-list">
+                    <div class="empty-state-sm">Loading...</div>
+                  </div>
+                </div>
+
+                <!-- Modpack info if applicable -->
+                <div class="card" id="modpack-info-card" style="display:none">
+                  <div class="card-header">
+                    <span>Active Modpack</span>
+                  </div>
+                  <div class="card-body" id="modpack-info-body"></div>
+                </div>
+              </div>
+
+              <!-- Right: search + install -->
+              <div class="mods-search-panel">
+                <div class="card">
+                  <div class="card-header">
+                    <span id="mods-search-title">Search Mods</span>
+                  </div>
+                  <div class="card-body">
+                    <div class="mods-search-type" id="mods-search-type">
+                      <button class="tab-btn active" data-content="mods">Mods</button>
+                      <button class="tab-btn" data-content="plugins">Plugins</button>
+                    </div>
+                    <div class="command-row">
+                      <input type="text" id="mod-search-input" placeholder="Search name or feature..." autocomplete="off" />
+                      <button class="btn btn-primary btn-sm" id="btn-mod-search">Search</button>
+                    </div>
+                    <div id="mod-search-results" class="mod-results"></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -232,6 +336,30 @@
     </main>
   </div>
 
+  <!-- ═══ Install modpack modal ══════════════════════════════════════════ -->
+  <div class="modal-overlay hidden" id="modpack-install-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modpack-modal-title">Install Modpack</h3>
+        <button class="btn btn-ghost btn-xs" id="modpack-modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modpack-modal-body">
+        <div class="form-group">
+          <label>Install on server</label>
+          <select id="modpack-target-server">
+            <option value="">Select a server...</option>
+          </select>
+        </div>
+        <p class="wz-hint" id="modpack-modal-hint"></p>
+      </div>
+      <div class="modal-footer">
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" id="modpack-modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modpack-modal-install">Install Modpack</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ Create Server Wizard ══════════════════════════════════════════ -->
   <div class="modal-overlay hidden" id="create-modal">
     <div class="modal modal-wizard">
@@ -244,7 +372,7 @@
         <div class="wz-step active" data-s="1"><span class="wz-num">1</span> Basics</div>
         <div class="wz-step" data-s="2"><span class="wz-num">2</span> Software</div>
         <div class="wz-step" data-s="3"><span class="wz-num">3</span> Settings</div>
-        <div class="wz-step" data-s="4"><span class="wz-num">4</span> Plugins</div>
+        <div class="wz-step" data-s="4"><span class="wz-num">4</span> Add-ons</div>
       </div>
 
       <!-- Step 1: Basics -->
@@ -261,6 +389,7 @@
       <!-- Step 2: Server Software -->
       <div class="wz-pane hidden" id="wz-2">
         <div class="modal-body">
+          <div class="type-section-label">Plugin Servers</div>
           <div class="type-grid">
             <button class="type-card selected" data-type="paper" type="button">
               <div class="type-icon">📄</div>
@@ -276,12 +405,36 @@
             <button class="type-card" data-type="spigot" type="button">
               <div class="type-icon">🔧</div>
               <div class="type-name">Spigot</div>
-              <div class="type-desc">Classic modded. Plugin support.</div>
+              <div class="type-desc">Classic. Plugin support.</div>
             </button>
             <button class="type-card" data-type="purpur" type="button">
               <div class="type-icon">🟣</div>
               <div class="type-name">Purpur</div>
-              <div class="type-desc">Paper fork. Extra config options.</div>
+              <div class="type-desc">Paper fork. Extra config.</div>
+            </button>
+          </div>
+          <div class="type-section-label" style="margin-top:14px">Mod Loaders</div>
+          <div class="type-grid">
+            <button class="type-card" data-type="fabric" type="button">
+              <div class="type-icon">🧵</div>
+              <div class="type-name">Fabric</div>
+              <div class="type-desc">Lightweight mod loader. Fast, modern.</div>
+              <span class="type-rec">For mods</span>
+            </button>
+            <button class="type-card" data-type="forge" type="button">
+              <div class="type-icon">⚒️</div>
+              <div class="type-name">Forge</div>
+              <div class="type-desc">Classic mod loader. Huge ecosystem.</div>
+            </button>
+            <button class="type-card" data-type="quilt" type="button">
+              <div class="type-icon">🪡</div>
+              <div class="type-name">Quilt</div>
+              <div class="type-desc">Fabric-compatible. Extra features.</div>
+            </button>
+            <button class="type-card" data-type="neoforge" type="button">
+              <div class="type-icon">🔩</div>
+              <div class="type-name">NeoForge</div>
+              <div class="type-desc">Modern Forge fork. 1.20.1+.</div>
             </button>
           </div>
         </div>
@@ -297,12 +450,15 @@
                 <option value="1G">1 GB</option>
                 <option value="2G" selected>2 GB</option>
                 <option value="4G">4 GB</option>
+                <option value="6G">6 GB</option>
                 <option value="8G">8 GB</option>
+                <option value="12G">12 GB</option>
               </select>
             </div>
             <div class="form-group">
               <label for="wz-maxplayers">Max Players</label>
               <select id="wz-maxplayers">
+                <option value="5">5</option>
                 <option value="10">10</option>
                 <option value="20" selected>20</option>
                 <option value="50">50</option>
@@ -329,28 +485,68 @@
               </select>
             </div>
           </div>
+          <div class="ram-hint" id="wz-ram-hint"></div>
         </div>
       </div>
 
-      <!-- Step 4: Plugins -->
+      <!-- Step 4: Add-ons (plugins for paper/spigot/purpur, mods for fabric/forge/quilt/neoforge) -->
       <div class="wz-pane hidden" id="wz-4">
         <div class="modal-body">
-          <p class="wz-hint">Select plugins to pre-install. You can add more later via the AI assistant.</p>
-          <div class="plugin-grid" id="wz-plugins">
-            <label class="plugin-opt"><input type="checkbox" value="essentialsx" checked />
-              <div class="plugin-opt-body"><strong>EssentialsX</strong><span>Teleport, homes, kits, warps &amp; economy</span></div></label>
-            <label class="plugin-opt"><input type="checkbox" value="vault" checked />
-              <div class="plugin-opt-body"><strong>Vault</strong><span>Economy &amp; permissions API (needed by many plugins)</span></div></label>
-            <label class="plugin-opt"><input type="checkbox" value="luckperms" />
-              <div class="plugin-opt-body"><strong>LuckPerms</strong><span>Advanced permissions &amp; rank management</span></div></label>
-            <label class="plugin-opt"><input type="checkbox" value="worldedit" />
-              <div class="plugin-opt-body"><strong>WorldEdit</strong><span>In-game map editor &amp; building tools</span></div></label>
-            <label class="plugin-opt"><input type="checkbox" value="worldguard" />
-              <div class="plugin-opt-body"><strong>WorldGuard</strong><span>Region protection &amp; area flags</span></div></label>
-            <label class="plugin-opt"><input type="checkbox" value="coreprotect" />
-              <div class="plugin-opt-body"><strong>CoreProtect</strong><span>Block logging, rollback &amp; restore</span></div></label>
-            <label class="plugin-opt"><input type="checkbox" value="griefprevention" />
-              <div class="plugin-opt-body"><strong>GriefPrevention</strong><span>Land claims &amp; anti-grief protection</span></div></label>
+          <!-- Plugin section -->
+          <div id="wz-plugins-section">
+            <p class="wz-hint">Select plugins to pre-install. You can add more later via the AI assistant.</p>
+            <div class="plugin-grid" id="wz-plugins">
+              <label class="plugin-opt"><input type="checkbox" value="essentialsx" checked />
+                <div class="plugin-opt-body"><strong>EssentialsX</strong><span>Teleport, homes, kits, warps &amp; economy</span></div></label>
+              <label class="plugin-opt"><input type="checkbox" value="vault" checked />
+                <div class="plugin-opt-body"><strong>Vault</strong><span>Economy &amp; permissions API (needed by many plugins)</span></div></label>
+              <label class="plugin-opt"><input type="checkbox" value="luckperms" />
+                <div class="plugin-opt-body"><strong>LuckPerms</strong><span>Advanced permissions &amp; rank management</span></div></label>
+              <label class="plugin-opt"><input type="checkbox" value="worldedit" />
+                <div class="plugin-opt-body"><strong>WorldEdit</strong><span>In-game map editor &amp; building tools</span></div></label>
+              <label class="plugin-opt"><input type="checkbox" value="worldguard" />
+                <div class="plugin-opt-body"><strong>WorldGuard</strong><span>Region protection &amp; area flags</span></div></label>
+              <label class="plugin-opt"><input type="checkbox" value="coreprotect" />
+                <div class="plugin-opt-body"><strong>CoreProtect</strong><span>Block logging, rollback &amp; restore</span></div></label>
+              <label class="plugin-opt"><input type="checkbox" value="griefprevention" />
+                <div class="plugin-opt-body"><strong>GriefPrevention</strong><span>Land claims &amp; anti-grief protection</span></div></label>
+            </div>
+          </div>
+
+          <!-- Mod section -->
+          <div id="wz-mods-section" class="hidden">
+            <p class="wz-hint">Select mods to pre-install. The server uses <strong id="wz-loader-name">Fabric</strong>.</p>
+            <div class="plugin-grid" id="wz-mods">
+              <!-- Fabric mods -->
+              <div id="wz-fabric-mods">
+                <label class="plugin-opt"><input type="checkbox" value="fabric-api" checked />
+                  <div class="plugin-opt-body"><strong>Fabric API</strong><span>Required by most Fabric mods</span></div></label>
+                <label class="plugin-opt"><input type="checkbox" value="sodium" />
+                  <div class="plugin-opt-body"><strong>Sodium</strong><span>Massive performance boost (rendering)</span></div></label>
+                <label class="plugin-opt"><input type="checkbox" value="lithium" />
+                  <div class="plugin-opt-body"><strong>Lithium</strong><span>Server-side performance optimization</span></div></label>
+                <label class="plugin-opt"><input type="checkbox" value="create-fabric" />
+                  <div class="plugin-opt-body"><strong>Create</strong><span>Automation &amp; machinery mod</span></div></label>
+                <label class="plugin-opt"><input type="checkbox" value="carpet" />
+                  <div class="plugin-opt-body"><strong>Carpet</strong><span>Technical Minecraft &amp; debugging</span></div></label>
+              </div>
+              <!-- Forge mods -->
+              <div id="wz-forge-mods" class="hidden">
+                <label class="plugin-opt"><input type="checkbox" value="jei" checked />
+                  <div class="plugin-opt-body"><strong>JEI</strong><span>Just Enough Items — item & recipe browser</span></div></label>
+                <label class="plugin-opt"><input type="checkbox" value="create" checked />
+                  <div class="plugin-opt-body"><strong>Create</strong><span>Automation &amp; machinery mod</span></div></label>
+                <label class="plugin-opt"><input type="checkbox" value="biomes-o-plenty" />
+                  <div class="plugin-opt-body"><strong>Biomes O' Plenty</strong><span>Massive biome expansion</span></div></label>
+                <label class="plugin-opt"><input type="checkbox" value="tinkers-construct" />
+                  <div class="plugin-opt-body"><strong>Tinkers' Construct</strong><span>Custom tool crafting</span></div></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Vanilla: no add-ons -->
+          <div id="wz-vanilla-section" class="hidden">
+            <p class="wz-hint">Vanilla servers don't support plugins or mods. Your server is ready to go!</p>
           </div>
         </div>
       </div>

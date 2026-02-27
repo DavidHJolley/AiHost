@@ -17,6 +17,8 @@ const db = require('./database');
 const docker = require('./docker');
 const ai = require('./ai');
 const actions = require('./actions');
+const modsModule = require('./mods');
+const modpacksModule = require('./modpacks');
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -122,6 +124,11 @@ app.post('/servers/create', asyncHandler(async (req, res) => {
   const supported = ['minecraft'];
   if (!supported.includes(game)) {
     return fail(res, `Unsupported game "${game}". Supported: ${supported.join(', ')}`);
+  }
+
+  const validTypes = ['vanilla', 'paper', 'spigot', 'purpur', 'fabric', 'forge', 'quilt', 'neoforge'];
+  if (!validTypes.includes(server_type)) {
+    return fail(res, `Unsupported server type "${server_type}". Supported: ${validTypes.join(', ')}`);
   }
 
   const id = uuidv4();
@@ -333,6 +340,146 @@ app.post('/servers/:id/plugins/install', asyncHandler(async (req, res) => {
   } catch (err) {
     fail(res, err.message, 500);
   }
+}));
+
+// ─── Mod management ───────────────────────────────────────────────────────────
+
+app.get('/mods/search', asyncHandler(async (req, res) => {
+  const { q, loader, limit = 8 } = req.query;
+  if (!q) return fail(res, 'q (query) is required');
+  try {
+    const results = await modsModule.searchMods(q, { loader: loader || null, limit: parseInt(limit) });
+    ok(res, { results });
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+app.get('/servers/:id/mods', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const installed = modsModule.listInstalledMods(SERVERS_PATH, server.id);
+  ok(res, { mods: installed });
+}));
+
+app.post('/servers/:id/mods/install', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { slug, query, loader } = req.body;
+  if (!slug && !query) return fail(res, 'slug or query is required');
+
+  const serverType = (server.server_type || 'vanilla').toLowerCase();
+  const resolvedLoader = loader || (docker.MOD_LOADER_TYPES.has(serverType) ? serverType : null);
+
+  if (!resolvedLoader || !modsModule.MOD_LOADERS.includes(resolvedLoader)) {
+    return fail(res, `Server type "${serverType}" does not support mods. Use fabric, forge, quilt, or neoforge.`);
+  }
+
+  try {
+    const result = await modsModule.installMod(SERVERS_PATH, server.id, resolvedLoader, { slug, query });
+    ok(res, { mod: result });
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+app.post('/servers/:id/mods/remove', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { filename } = req.body;
+  if (!filename) return fail(res, 'filename is required');
+
+  try {
+    const result = modsModule.removeMod(SERVERS_PATH, server.id, filename);
+    ok(res, result);
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+// ─── Modpack management ───────────────────────────────────────────────────────
+
+app.get('/modpacks/browse', asyncHandler(async (req, res) => {
+  const { q, sort = 'downloads', loader, limit = 12, offset = 0 } = req.query;
+  try {
+    const result = await modpacksModule.browseModpacks({
+      query: q || '',
+      sort,
+      loader: loader || null,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+    });
+    ok(res, result);
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+app.get('/modpacks/:slug', asyncHandler(async (req, res) => {
+  try {
+    const details = await modpacksModule.getModpackDetails(req.params.slug);
+    ok(res, { modpack: details });
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+app.post('/servers/:id/modpack/install', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { modpackSlug, loader } = req.body;
+  if (!modpackSlug) return fail(res, 'modpackSlug is required');
+
+  let packDetails;
+  try {
+    packDetails = await modpacksModule.getModpackDetails(modpackSlug);
+  } catch (err) {
+    return fail(res, `Modpack not found: ${err.message}`, 404);
+  }
+
+  const packLoader = loader || (packDetails.loaders && packDetails.loaders[0]) || 'fabric';
+
+  // Stop and remove existing container
+  if (server.container_id) {
+    try { await docker.stopContainer(server.container_id); } catch {}
+    try { await docker.removeContainer(server.container_id); } catch {}
+  }
+
+  db.updateServerType(server.id, packLoader);
+  db.updateServerStatus(server.id, 'stopped', null);
+
+  modpacksModule.saveModpackConfig(SERVERS_PATH, server.id, {
+    slug: packDetails.slug,
+    title: packDetails.title,
+    loader: packLoader,
+    installedAt: new Date().toISOString(),
+  });
+
+  try {
+    const updatedServer = db.getServerById(server.id);
+    const extra = { MODRINTH_MODPACK: packDetails.slug };
+    const containerId = await docker.createContainer(updatedServer, extra);
+    db.updateServerStatus(server.id, 'starting', containerId);
+    await docker.startContainer(containerId);
+    db.updateServerStatus(server.id, 'running', containerId);
+
+    ok(res, { server: db.getServerById(server.id), modpack: packDetails });
+  } catch (err) {
+    db.updateServerStatus(server.id, 'error');
+    fail(res, `Failed to start server with modpack: ${err.message}`, 500);
+  }
+}));
+
+app.get('/servers/:id/modpack', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const config = modpacksModule.loadModpackConfig(SERVERS_PATH, server.id);
+  ok(res, { modpack: config });
 }));
 
 // ─── Server config ────────────────────────────────────────────────────────────

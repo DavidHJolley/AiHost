@@ -50,20 +50,52 @@ function serverVolumePath(serverId) {
   return dir;
 }
 
+// Mod loader server types — these use /data/mods/ instead of /data/plugins/
+const MOD_LOADER_TYPES = new Set(['fabric', 'forge', 'quilt', 'neoforge']);
+
 function buildEnvVars(game, ram, extra = {}, serverType = 'vanilla') {
   const env = { ...extra };
 
   if (game === 'minecraft') {
     env.EULA = 'TRUE';
     env.MEMORY = ram;
-    env.TYPE = (serverType || 'vanilla').toUpperCase();
     env.VERSION = 'LATEST';
     env.ONLINE_MODE = 'FALSE';
     env.OVERRIDE_SERVER_PROPERTIES = 'false';
     env.ENABLE_RCON = 'true';
     env.RCON_PASSWORD = RCON_PASSWORD;
     if (extra.SERVER_PORT) env.SERVER_PORT = extra.SERVER_PORT;
+
+    const type = (serverType || 'vanilla').toLowerCase();
+
+    if (type === 'vanilla') {
+      env.TYPE = 'VANILLA';
+    } else if (type === 'paper') {
+      env.TYPE = 'PAPER';
+    } else if (type === 'spigot') {
+      env.TYPE = 'SPIGOT';
+    } else if (type === 'purpur') {
+      env.TYPE = 'PURPUR';
+    } else if (type === 'fabric') {
+      env.TYPE = 'FABRIC';
+    } else if (type === 'forge') {
+      env.TYPE = 'FORGE';
+    } else if (type === 'quilt') {
+      env.TYPE = 'QUILT';
+    } else if (type === 'neoforge') {
+      env.TYPE = 'NEOFORGE';
+    } else {
+      env.TYPE = type.toUpperCase();
+    }
+
+    // Modpack support — pass modpack slug/id as env var for itzg image auto-install
+    if (extra.MODRINTH_MODPACK) {
+      env.MODRINTH_MODPACK = extra.MODRINTH_MODPACK;
+    }
   }
+
+  // Strip internal keys that shouldn't be passed as Docker env vars
+  delete env.MODRINTH_MODPACK_INTERNAL;
 
   return Object.entries(env).map(([k, v]) => `${k}=${v}`);
 }
@@ -296,4 +328,5 @@ module.exports = {
   containerName,
   execCommand,
   streamContainerLogs,
+  MOD_LOADER_TYPES,
 };
