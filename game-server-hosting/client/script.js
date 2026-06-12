@@ -884,6 +884,53 @@
     return div;
   }
 
+  /**
+   * Render a change preview with Apply / Cancel buttons. The pending action is
+   * only sent to /ai/execute if the user approves — otherwise nothing runs.
+   */
+  function appendConfirm(previewText, pendingAction) {
+    const msgDiv = appendChat('assistant', previewText);
+    const bubble = msgDiv.querySelector('.chat-bubble');
+
+    const row = document.createElement('div');
+    row.className = 'chat-confirm-row';
+    row.innerHTML = `
+      <button class="btn btn-primary btn-sm" data-c="apply">✓ Apply changes</button>
+      <button class="btn btn-ghost btn-sm" data-c="cancel">✕ Cancel</button>`;
+    bubble.appendChild(row);
+
+    const applyBtn = row.querySelector('[data-c="apply"]');
+    const cancelBtn = row.querySelector('[data-c="cancel"]');
+    const disable = () => { applyBtn.disabled = true; cancelBtn.disabled = true; };
+
+    applyBtn.addEventListener('click', async () => {
+      disable();
+      applyBtn.textContent = '⟳ Applying...';
+      const thinking = appendChat('assistant', 'Applying changes', true);
+      try {
+        const d = await api('/ai/execute', { method: 'POST', body: JSON.stringify({ action: pendingAction }) });
+        thinking.remove();
+        const reply = d.reply || (d.error ? `Error: ${d.error}` : 'Done.');
+        appendChat(d.success === false ? 'error' : 'assistant', reply);
+        chatHistory.push({ role: 'assistant', content: `[User approved the changes] ${reply}` });
+        await loadServers();
+      } catch (err) {
+        thinking.remove();
+        appendChat('error', `Network error: ${err.message}`);
+      }
+      applyBtn.textContent = '✓ Applied';
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      disable();
+      appendChat('assistant', 'Cancelled — no changes were made.');
+      chatHistory.push({ role: 'assistant', content: '[User cancelled the proposed changes — nothing was executed]' });
+    });
+
+    const box = $('#chat-history');
+    box.scrollTop = box.scrollHeight;
+  }
+
   async function sendChat() {
     const input = $('#chat-input');
     const msg = input.value.trim();
@@ -900,8 +947,15 @@
       const d = await api('/ai', { method: 'POST', body: JSON.stringify({ message: msg, history: chatHistory.slice(0, -1) }) });
       thinking.remove();
       const reply = d.reply || (d.error ? `Error: ${d.error}` : 'Done.');
-      appendChat(d.success === false ? 'error' : 'assistant', reply);
-      chatHistory.push({ role: 'assistant', content: reply });
+
+      if (d.requiresConfirmation && d.pendingAction) {
+        appendConfirm(reply, d.pendingAction);
+        chatHistory.push({ role: 'assistant', content: `[Proposed changes awaiting user approval]\n${reply}` });
+      } else {
+        appendChat(d.success === false ? 'error' : 'assistant', reply);
+        chatHistory.push({ role: 'assistant', content: reply });
+      }
+
       while (chatHistory.length > MAX_HISTORY) chatHistory.shift();
       await loadServers();
     } catch (err) {

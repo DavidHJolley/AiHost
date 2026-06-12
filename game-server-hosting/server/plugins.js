@@ -161,7 +161,11 @@ async function downloadFile(url, destPath) {
  *
  * Returns { title, slug, version, filename, size }.
  */
-async function installContent(serversPath, serverId, {
+/**
+ * Resolve what an install WOULD do, without downloading anything.
+ * Shared by installContent (which then downloads) and previews.
+ */
+async function resolveContent(serversPath, serverId, {
   slug, query, kind = 'plugin', loaders, gameVersion, folder = 'plugins',
 } = {}) {
   let project;
@@ -209,27 +213,35 @@ async function installContent(serversPath, serverId, {
   const destDir = path.join(serversPath, serverId, folder);
   const destPath = path.join(destDir, file.filename);
 
-  if (fs.existsSync(destPath)) {
-    return {
-      title: project.title,
-      slug: project.slug,
-      version: version.version_number,
-      filename: file.filename,
-      size: file.size,
-      alreadyInstalled: true,
-    };
-  }
-
-  await downloadFile(file.url, destPath);
-
   return {
     title: project.title,
     slug: project.slug,
     version: version.version_number,
     filename: file.filename,
     size: file.size,
-    alreadyInstalled: false,
+    url: file.url,
+    destPath,
+    folder,
+    alreadyInstalled: fs.existsSync(destPath),
   };
+}
+
+async function installContent(serversPath, serverId, opts = {}) {
+  const resolved = await resolveContent(serversPath, serverId, opts);
+  const { url, destPath, ...info } = resolved;
+
+  if (info.alreadyInstalled) return info;
+
+  await downloadFile(url, destPath);
+  return info;
+}
+
+/**
+ * Dry-run: report what an install would download and where, no side effects.
+ */
+async function previewContent(serversPath, serverId, opts = {}) {
+  const { url, destPath, ...info } = await resolveContent(serversPath, serverId, opts);
+  return info;
 }
 
 async function installPlugin(serversPath, serverId, { slug, query } = {}) {
@@ -304,6 +316,7 @@ module.exports = {
   getLatestVersion,
   installPlugin,
   installMod,
+  previewContent,
   listInstalledPlugins,
   listInstalledMods,
   removePlugin,

@@ -1183,3 +1183,15 @@ html, body {
   flex-direction: column;
   gap: 8px;
 }
+
+/* ═══ AI change confirmation ════════════════════════════════════════════ */
+
+.chat-confirm-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-confirm-row .btn:disabled { opacity: .55; }

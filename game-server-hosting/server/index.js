@@ -574,6 +574,26 @@ app.post('/ai', asyncHandler(async (req, res) => {
     });
   }
 
+  // ── Verification gate ──
+  // Mutating actions are never executed directly. We build a dry-run preview
+  // (config diffs, files added/removed, world impact) and hand it back; the
+  // client must POST the action to /ai/execute after the user approves.
+  const steps = intent.action === 'multi_step' && Array.isArray(intent.steps)
+    ? intent.steps
+    : [intent];
+  const needsConfirmation = steps.some((s) => s && actions.MUTATING_ACTIONS.has(s.action));
+
+  if (needsConfirmation) {
+    console.log(`[AI] Mutating intent — returning preview for approval (${steps.map((s) => s.action).join(', ')})`);
+    const preview = await actions.buildPlanPreview(steps, executionCtx);
+    return ok(res, {
+      reply: preview.text,
+      requiresConfirmation: true,
+      pendingAction: intent,
+      action: intent,
+    });
+  }
+
   if (intent.action === 'multi_step' && Array.isArray(intent.steps)) {
     console.log(`[AI] Executing multi-step plan: ${intent.steps.length} steps`);
     const result = await actions.executePlan(intent.steps, executionCtx);
@@ -593,6 +613,30 @@ app.post('/ai', asyncHandler(async (req, res) => {
   return ok(res, {
     reply: result.reply,
     action: intent,
+    server: result.server,
+    servers: result.servers,
+  });
+}));
+
+// ─── AI execute (after user approval) ─────────────────────────────────────────
+
+app.post('/ai/execute', asyncHandler(async (req, res) => {
+  const { action } = req.body;
+  if (!action || !action.action) return fail(res, 'action is required');
+
+  console.log(`[AI] User approved — executing: ${action.action}`);
+
+  // Every step still goes through schema validation in executeAction, so
+  // anything not in ACTION_SCHEMAS (e.g. delete_server) is rejected here too.
+  if (action.action === 'multi_step' && Array.isArray(action.steps)) {
+    const result = await actions.executePlan(action.steps, executionCtx);
+    return ok(res, { success: result.success, reply: result.reply, results: result.results });
+  }
+
+  const result = await actions.executeAction(action, executionCtx);
+  return ok(res, {
+    success: result.success,
+    reply: result.reply,
     server: result.server,
     servers: result.servers,
   });

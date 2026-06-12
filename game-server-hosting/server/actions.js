@@ -45,10 +45,8 @@ const ACTION_SCHEMAS = {
     required: ['name'],
     optional: [],
   },
-  delete_server: {
-    required: ['name'],
-    optional: [],
-  },
+  // delete_server intentionally absent — deleting servers is user-only via the
+  // panel UI (REST /servers/:id/delete). The AI must never be able to do it.
   list_servers: {
     required: [],
     optional: [],
@@ -350,18 +348,6 @@ const executors = {
       reply: `**${server.name}** restarted.`,
       server: ctx.db.getServerById(server.id),
     };
-  },
-
-  async delete_server(action, ctx) {
-    const server = findServerByName(ctx.db, action.name);
-    if (!server) {
-      return { success: false, reply: `No server found with name "${action.name}".` };
-    }
-    if (server.container_id) {
-      await ctx.docker.removeContainer(server.container_id);
-    }
-    ctx.db.deleteServer(server.id);
-    return { success: true, reply: `Server **${server.name}** has been deleted.` };
   },
 
   async list_servers(_action, ctx) {
@@ -796,6 +782,295 @@ const executors = {
   },
 };
 
+// ─── Change preview (dry run) ──────────────────────────────────────────────────
+
+/**
+ * Actions that modify files, config, or server software. Anything in this set
+ * is shown to the user as a preview and only executed after they approve.
+ * start/stop/restart are reversible runtime ops and run without confirmation.
+ */
+const MUTATING_ACTIONS = new Set([
+  'create_server',
+  'modify_server',
+  'install_plugin',
+  'remove_plugin',
+  'install_modpack',
+  'remove_modpack',
+]);
+
+function fmtSize(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  const mb = bytes / 1024 / 1024;
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`;
+}
+
+/**
+ * Describe what a single step WILL do — files created/deleted, config lines
+ * changed, software/container changes — without doing any of it.
+ * `createdNames` tracks servers created earlier in the same plan, so later
+ * steps targeting them don't report "server not found".
+ */
+async function previewStep(step, ctx, createdNames) {
+  const a = step.action;
+  const nameKey = (n) => String(n || '').toLowerCase().trim();
+
+  const findTarget = () => {
+    const server = findServerByName(ctx.db, step.name);
+    if (server) return { server, isNew: false };
+    if (createdNames.has(nameKey(step.name))) return { server: null, isNew: true };
+    return { server: null, isNew: false };
+  };
+
+  switch (a) {
+    case 'create_server': {
+      const name = step.name || '(auto-named)';
+      createdNames.add(nameKey(step.name));
+      const lines = [
+        `Software: ${(step.server_type || 'vanilla')} · RAM: ${normaliseRam(step.ram || '2G')}`,
+        `Creates a new server folder and Docker container — nothing existing is touched`,
+      ];
+      const props = step.properties || {};
+      const propLines = Object.entries(props)
+        .map(([k, v]) => `${templates.envKeyToPropertyKey(k)}=${v}`);
+      if (propLines.length) lines.push(`server.properties will be set: ${propLines.join(', ')}`);
+      return { title: `Create server "${name}"`, lines, warnings: [] };
+    }
+
+    case 'modify_server': {
+      const { server, isNew } = findTarget();
+      const props = step.properties || {};
+      const entries = Object.entries(props);
+
+      if (!server) {
+        return {
+          title: `Modify ${isNew ? `new server "${step.name}"` : `server "${step.name}"`}`,
+          lines: isNew
+            ? entries.map(([k, v]) => `${templates.envKeyToPropertyKey(k)}: (default) → ${v}`)
+            : [`Server "${step.name}" was not found — this step will fail`],
+          warnings: [],
+        };
+      }
+
+      const serverDir = path.join(ctx.serversPath, server.id);
+      const config = readServerProperties(serverDir) || {};
+      const lines = entries.map(([envKey, value]) => {
+        const propKey = templates.envKeyToPropertyKey(envKey);
+        const current = config[propKey];
+        return `${propKey}: ${current === undefined ? '(unset)' : current} → ${value}`;
+      });
+      lines.push(`File changed: server.properties (nothing else)`);
+
+      const warnings = [];
+      if (server.status === 'running') {
+        warnings.push(`**${server.name}** must be restarted before these settings take effect.`);
+      }
+      return { title: `Modify config on "${server.name}"`, lines, warnings };
+    }
+
+    case 'install_plugin': {
+      const { server, isNew } = findTarget();
+      const what = step.slug || `best match for "${step.query}"`;
+
+      if (!server) {
+        if (isNew) {
+          return {
+            title: `Install ${what} on new server "${step.name}"`,
+            lines: [`Downloads one .jar from Modrinth into the new server's plugins/ folder`],
+            warnings: [],
+          };
+        }
+        return {
+          title: `Install plugin on "${step.name}"`,
+          lines: [`Server "${step.name}" was not found — this step will fail`],
+          warnings: [],
+        };
+      }
+
+      const pack = ctx.db.getModpack(server);
+      const lines = [];
+      const warnings = [];
+
+      try {
+        const info = await plugins.previewContent(ctx.serversPath, server.id, {
+          slug: step.slug,
+          query: step.query,
+          kind: pack ? 'mod' : 'plugin',
+          folder: pack ? 'mods' : 'plugins',
+          loaders: pack ? [pack.loader] : undefined,
+          gameVersion: pack ? pack.mcVersion : undefined,
+        });
+
+        if (info.alreadyInstalled) {
+          lines.push(`**${info.title}** v${info.version} is already installed — nothing will change`);
+        } else {
+          lines.push(`**${info.title}** v${info.version}`);
+          lines.push(`New file: ${info.folder}/${info.filename} (${fmtSize(info.size)}) — no other files are touched`);
+        }
+      } catch (err) {
+        lines.push(`Could not resolve on Modrinth: ${err.message} — this step will fail`);
+        return { title: `Install ${pack ? 'mod' : 'plugin'} on "${server.name}"`, lines, warnings };
+      }
+
+      const PLUGIN_LOADERS = ['paper', 'spigot', 'purpur'];
+      if (!pack && !PLUGIN_LOADERS.includes(server.server_type)) {
+        warnings.push(`**${server.name}** is ${server.server_type} — it will be upgraded to **Paper** to support plugins. The container is recreated; your world and all files are kept.`);
+      } else if (server.status === 'running') {
+        warnings.push(`A restart is needed to load it on **${server.name}**.`);
+      }
+
+      return { title: `Install ${pack ? 'mod' : 'plugin'} on "${server.name}"`, lines, warnings };
+    }
+
+    case 'remove_plugin': {
+      const { server } = findTarget();
+      if (!server) {
+        return {
+          title: `Remove "${step.pluginName}" from "${step.name}"`,
+          lines: [`Server "${step.name}" was not found — this step will fail`],
+          warnings: [],
+        };
+      }
+
+      const pack = ctx.db.getModpack(server);
+      const folder = pack ? 'mods' : 'plugins';
+      const installed = pack
+        ? plugins.listInstalledMods(ctx.serversPath, server.id)
+        : plugins.listInstalledPlugins(ctx.serversPath, server.id);
+      const target = String(step.pluginName || '').toLowerCase();
+      const match = installed.find((p) => p.filename.toLowerCase() === target)
+        || installed.find((p) => p.filename.toLowerCase().includes(target));
+
+      const lines = match
+        ? [`File deleted: ${folder}/${match.filename} (${fmtSize(match.size)}) — only this file, nothing else`]
+        : [`No installed file matches "${step.pluginName}" — this step will fail`];
+
+      return { title: `Remove ${pack ? 'mod' : 'plugin'} from "${server.name}"`, lines, warnings: [] };
+    }
+
+    case 'install_modpack': {
+      const { server, isNew } = findTarget();
+      const lines = [];
+      const warnings = [];
+
+      try {
+        const project = await modpacks.resolveModpack({ slug: step.slug, query: step.query });
+        const version = await modpacks.getLatestPackVersion(project.id);
+        if (!version) {
+          lines.push(`**${project.title}** has no server-compatible version — this step will fail`);
+          return { title: `Install modpack`, lines, warnings };
+        }
+        const loader = version.loaders.find((l) => modpacks.SUPPORTED_LOADERS.includes(l)) || version.loaders[0];
+        const mcVersion = version.game_versions[version.game_versions.length - 1];
+
+        lines.push(`**${project.title}** v${version.version_number} (${loader}, Minecraft ${mcVersion})`);
+        lines.push(`The Docker container is recreated to run this pack — server software changes to ${loader}`);
+        lines.push(`First start downloads all the pack's mods (can take several minutes)`);
+
+        if (server) {
+          const ramNum = parseFloat(server.ram);
+          const isGb = String(server.ram).toUpperCase().includes('G');
+          const mb = isGb ? ramNum * 1024 : ramNum;
+          if (mb < 4096) lines.push(`RAM will be raised: ${server.ram} → 4G (modpack minimum)`);
+
+          warnings.push(`Your world folder and files are **kept, not deleted** — but an existing world may be incompatible with ${project.title}'s Minecraft version/mods and could fail to load or behave oddly. Back it up first if it matters.`);
+          const existingPack = ctx.db.getModpack(server);
+          if (existingPack) {
+            warnings.push(`This replaces the current pack **${existingPack.title}** — leftover mod files from it may conflict.`);
+          }
+        }
+
+        return {
+          title: server
+            ? `Install modpack on "${server.name}"`
+            : `Install modpack on ${isNew ? `new server "${step.name}"` : `"${step.name}" (not found — will fail)`}`,
+          lines,
+          warnings,
+        };
+      } catch (err) {
+        return {
+          title: `Install modpack`,
+          lines: [`Could not resolve on Modrinth: ${err.message} — this step will fail`],
+          warnings: [],
+        };
+      }
+    }
+
+    case 'remove_modpack': {
+      const { server } = findTarget();
+      if (!server) {
+        return {
+          title: `Remove modpack from "${step.name}"`,
+          lines: [`Server "${step.name}" was not found — this step will fail`],
+          warnings: [],
+        };
+      }
+      const pack = ctx.db.getModpack(server);
+      if (!pack) {
+        return {
+          title: `Remove modpack from "${server.name}"`,
+          lines: [`No modpack is installed — this step will fail`],
+          warnings: [],
+        };
+      }
+      return {
+        title: `Remove modpack "${pack.title}" from "${server.name}"`,
+        lines: [
+          `The container is recreated as a plain **${server.server_type}** server`,
+          `Pack files in mods/ stay on disk but will no longer load`,
+        ],
+        warnings: [
+          `Your world folder is **kept, not deleted** — but a world generated with ${pack.title}'s mods may not load correctly on ${server.server_type}. Back it up first if it matters.`,
+        ],
+      };
+    }
+
+    // Non-mutating steps inside an approved plan — describe briefly
+    case 'start_server': return { title: `Start "${step.name}"`, lines: [], warnings: [] };
+    case 'stop_server': return { title: `Stop "${step.name}"`, lines: [], warnings: [] };
+    case 'restart_server': return { title: `Restart "${step.name}"`, lines: [], warnings: [] };
+    default:
+      return { title: `${a} ${step.name ? `on "${step.name}"` : ''}`.trim(), lines: [], warnings: [] };
+  }
+}
+
+/**
+ * Build a human-readable dry-run preview for a plan (one or more steps).
+ * Nothing is executed. Returns { text, items }.
+ */
+async function buildPlanPreview(steps, ctx) {
+  const items = [];
+  const createdNames = new Set();
+
+  for (const step of steps) {
+    items.push(await previewStep(step, ctx, createdNames));
+  }
+
+  const blocks = items.map((item, i) => {
+    const num = steps.length > 1 ? `${i + 1}. ` : '';
+    const body = item.lines.map((l) => `• ${l}`).join('\n');
+    return `**${num}${item.title}**${body ? `\n${body}` : ''}`;
+  });
+
+  const warnings = items.flatMap((item) => item.warnings);
+
+  const parts = [
+    `**Review before applying** — nothing has been changed yet:`,
+    '',
+    blocks.join('\n\n'),
+  ];
+
+  if (warnings.length) {
+    parts.push('', ...warnings.map((w) => `⚠ ${w}`));
+  }
+
+  const deletesFiles = steps.some((s) => s.action === 'remove_plugin');
+  parts.push('', deletesFiles
+    ? `No world or player data is deleted — only the file listed above.`
+    : `No files are deleted by these changes. Your world and player data are safe.`);
+
+  return { text: parts.join('\n'), items };
+}
+
 // ─── Main executor ─────────────────────────────────────────────────────────────
 
 /**
@@ -863,9 +1138,11 @@ async function executePlan(steps, ctx) {
 
 module.exports = {
   ACTION_SCHEMAS,
+  MUTATING_ACTIONS,
   validateAction,
   executeAction,
   executePlan,
+  buildPlanPreview,
   readServerProperties,
   findServerByName,
 };
