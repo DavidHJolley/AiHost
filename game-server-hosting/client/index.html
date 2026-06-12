@@ -48,6 +48,14 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           <span>Files</span>
         </button>
+        <button class="nav-tab" data-tab="plugins">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg>
+          <span id="nav-tab-plugins-label">Plugins</span>
+        </button>
+        <button class="nav-tab" data-tab="modpack">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <span>Modpack</span>
+        </button>
         <button class="nav-tab" data-tab="players">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Players</span>
@@ -195,6 +203,65 @@
                   <button class="btn btn-primary btn-xs hidden" id="btn-file-save">Save</button>
                 </div>
                 <textarea id="files-editor-content" class="files-editor-content" placeholder="Select a file to view its contents..." readonly></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Plugins / Mods tab -->
+          <div class="tab-pane hidden" id="tab-plugins">
+            <div class="addons-layout">
+              <div class="card">
+                <div class="card-header">
+                  <span id="plugins-installed-title">Installed Plugins</span>
+                  <button class="btn btn-ghost btn-xs" id="btn-plugins-refresh">↻ Refresh</button>
+                </div>
+                <div class="card-body" id="plugins-installed">
+                  <div class="empty-state-sm">Loading...</div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-header">
+                  <span id="plugins-browse-title">Browse Modrinth</span>
+                </div>
+                <div class="card-body">
+                  <div class="addon-search-row">
+                    <input type="text" id="plugins-search-input" placeholder="Search plugins... e.g. teleport, economy, worldedit" autocomplete="off" />
+                    <button class="btn btn-primary btn-sm" id="plugins-search-btn">Search</button>
+                  </div>
+                  <div class="addon-results" id="plugins-search-results">
+                    <div class="empty-state-sm">Search Modrinth to find and install content with one click.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modpack tab -->
+          <div class="tab-pane hidden" id="tab-modpack">
+            <div class="addons-layout">
+              <div class="card">
+                <div class="card-header">
+                  <span>Current Modpack</span>
+                </div>
+                <div class="card-body" id="modpack-current">
+                  <div class="empty-state-sm">Loading...</div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-header">
+                  <span>Browse Modpacks</span>
+                </div>
+                <div class="card-body">
+                  <div class="addon-search-row">
+                    <input type="text" id="modpack-search-input" placeholder="Search modpacks... e.g. Cobblemon, skyblock, tech" autocomplete="off" />
+                    <button class="btn btn-primary btn-sm" id="modpack-search-btn">Search</button>
+                  </div>
+                  <div class="addon-results" id="modpack-search-results">
+                    <div class="empty-state-sm">Installing a modpack converts this server and restarts it. Your world files are kept.</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

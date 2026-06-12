@@ -65,6 +65,11 @@
   function gameLabel(g) { return g === 'minecraft' ? 'Minecraft' : g; }
   function srv() { return servers.find((s) => s.id === selectedServerId) || null; }
 
+  function serverModpack(s) {
+    if (!s || !s.modpack) return null;
+    try { return JSON.parse(s.modpack); } catch { return null; }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // Navigation
   // ═══════════════════════════════════════════════════════════════════════
@@ -117,6 +122,8 @@
     if (tab === 'overview') renderOverview();
     else if (tab === 'console') initConsole();
     else if (tab === 'files') loadFiles('');
+    else if (tab === 'plugins') loadPluginsTab();
+    else if (tab === 'modpack') loadModpackTab();
     else if (tab === 'players') loadPlayers();
   }
 
@@ -181,7 +188,7 @@
         <div class="server-card-stats">
           <div class="stat"><span class="stat-label">Port</span><span>${s.port}</span></div>
           <div class="stat"><span class="stat-label">RAM</span><span>${s.ram}</span></div>
-          <div class="stat"><span class="stat-label">Type</span><span>${s.server_type || 'vanilla'}</span></div>
+          <div class="stat"><span class="stat-label">Type</span><span>${(() => { const p = serverModpack(s); return p ? escHtml(p.title) : (s.server_type || 'vanilla'); })()}</span></div>
         </div>
         <div class="server-card-actions">
           <button class="btn btn-sm btn-accent" data-a="manage">Manage</button>
@@ -218,6 +225,7 @@
     badge.className = `badge badge-${statusColor(s.status)}`;
     $('#btn-start').disabled = s.status === 'running';
     $('#btn-stop').disabled = ['stopped', 'error'].includes(s.status);
+    $('#nav-tab-plugins-label').textContent = serverModpack(s) ? 'Mods' : 'Plugins';
   }
 
   function renderServerDetail() {
@@ -230,6 +238,8 @@
     if (currentTab === 'overview') renderOverview();
     else if (currentTab === 'console') initConsole();
     else if (currentTab === 'files') loadFiles('');
+    else if (currentTab === 'plugins') loadPluginsTab();
+    else if (currentTab === 'modpack') loadModpackTab();
     else if (currentTab === 'players') loadPlayers();
   }
 
@@ -248,7 +258,8 @@
     $('#overview-name').textContent = s.name;
     $('#overview-port').textContent = s.port;
     $('#overview-ram').textContent = s.ram;
-    $('#overview-type').textContent = s.server_type || 'vanilla';
+    const pack = serverModpack(s);
+    $('#overview-type').textContent = pack ? `Modpack — ${pack.title}` : (s.server_type || 'vanilla');
     $('#overview-ip').textContent = `localhost:${s.port}`;
 
     if (s.status === 'running') {
@@ -565,6 +576,207 @@
       }
       loadFiles(currentFilesPath);
     } catch (err) { alert(`Failed: ${err.message}`); }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Plugins / Mods tab
+  // ═══════════════════════════════════════════════════════════════════════
+
+  let addonsKind = 'plugin'; // 'plugin' | 'mod' — set from the server's modpack state
+
+  function addonRow({ icon, title, subtitle, meta, btnLabel, btnClass = 'btn-primary', onClick, danger = false }) {
+    const row = document.createElement('div');
+    row.className = 'addon-row';
+    row.innerHTML = `
+      ${icon ? `<img class="addon-icon" src="${icon}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="addon-icon addon-icon-blank">📦</div>'}
+      <div class="addon-body">
+        <div class="addon-title">${escHtml(title)}</div>
+        ${subtitle ? `<div class="addon-sub">${escHtml(subtitle)}</div>` : ''}
+        ${meta ? `<div class="addon-meta">${escHtml(meta)}</div>` : ''}
+      </div>
+      <button class="btn btn-sm ${danger ? 'btn-danger-outline' : btnClass} addon-btn">${escHtml(btnLabel)}</button>`;
+
+    const btn = row.querySelector('.addon-btn');
+    btn.addEventListener('click', async () => {
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⟳ ...';
+      try {
+        await onClick(btn);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+    return row;
+  }
+
+  async function loadPluginsTab() {
+    const box = $('#plugins-installed');
+    box.innerHTML = '<div class="empty-state-sm">Loading...</div>';
+
+    try {
+      const d = await api(`/servers/${selectedServerId}/plugins`);
+      if (!d.success) { box.innerHTML = `<div class="empty-state-sm">${escHtml(d.error || 'Failed')}</div>`; return; }
+
+      addonsKind = d.kind === 'mod' ? 'mod' : 'plugin';
+      const label = addonsKind === 'mod' ? 'Mods' : 'Plugins';
+      $('#plugins-installed-title').textContent = `Installed ${label}`;
+      $('#nav-tab-plugins-label').textContent = label;
+      $('#plugins-browse-title').textContent = `Browse Modrinth ${label}`;
+      $('#plugins-search-input').placeholder = addonsKind === 'mod'
+        ? 'Search mods... e.g. minimap, storage, performance'
+        : 'Search plugins... e.g. teleport, economy, worldedit';
+
+      if (!d.plugins.length) {
+        box.innerHTML = `<div class="empty-state-sm">No ${label.toLowerCase()} installed yet. Search Modrinth on the right →</div>`;
+        return;
+      }
+
+      box.innerHTML = '';
+      for (const p of d.plugins) {
+        box.appendChild(addonRow({
+          title: p.filename,
+          meta: fmtBytes(p.size),
+          btnLabel: 'Remove',
+          danger: true,
+          onClick: async () => {
+            if (!confirm(`Remove ${p.filename}?`)) return;
+            const r = await api(`/servers/${selectedServerId}/plugins/remove`, {
+              method: 'POST',
+              body: JSON.stringify({ filename: p.filename }),
+            });
+            if (!r.success) alert(r.error || 'Failed to remove');
+            loadPluginsTab();
+          },
+        }));
+      }
+    } catch (err) {
+      box.innerHTML = `<div class="empty-state-sm">Error: ${escHtml(err.message)}</div>`;
+    }
+  }
+
+  async function searchPluginsUI() {
+    const q = $('#plugins-search-input').value.trim();
+    if (!q) return;
+    const out = $('#plugins-search-results');
+    out.innerHTML = '<div class="empty-state-sm">Searching Modrinth...</div>';
+
+    try {
+      const d = await api(`/plugins/search?q=${encodeURIComponent(q)}&serverId=${encodeURIComponent(selectedServerId)}`);
+      if (!d.success) { out.innerHTML = `<div class="empty-state-sm">${escHtml(d.error || 'Search failed')}</div>`; return; }
+      if (!d.results.length) { out.innerHTML = '<div class="empty-state-sm">No results. Try different keywords.</div>'; return; }
+
+      out.innerHTML = '';
+      for (const p of d.results) {
+        out.appendChild(addonRow({
+          icon: p.icon,
+          title: p.title,
+          subtitle: p.description,
+          meta: `${p.downloads.toLocaleString()} downloads`,
+          btnLabel: 'Install',
+          onClick: async (btn) => {
+            const r = await api(`/servers/${selectedServerId}/plugins/install`, {
+              method: 'POST',
+              body: JSON.stringify({ slug: p.slug }),
+            });
+            if (r.success) {
+              btn.textContent = r.plugin.alreadyInstalled ? '✓ Installed' : '✓ Done';
+              loadPluginsTab();
+              await loadServers();
+            } else {
+              alert(r.error || 'Install failed');
+            }
+          },
+        }));
+      }
+    } catch (err) {
+      out.innerHTML = `<div class="empty-state-sm">Error: ${escHtml(err.message)}</div>`;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Modpack tab
+  // ═══════════════════════════════════════════════════════════════════════
+
+  async function loadModpackTab() {
+    const box = $('#modpack-current');
+    const s = srv();
+    if (!s) return;
+
+    const pack = serverModpack(s);
+    if (!pack) {
+      box.innerHTML = `
+        <div class="empty-state-sm">
+          No modpack installed — this is a plain <strong>${escHtml(s.server_type || 'vanilla')}</strong> server.<br>
+          Search on the right to install one, or ask the AI assistant (e.g. <em>"install All the Mods 9"</em>).
+        </div>`;
+      return;
+    }
+
+    box.innerHTML = '';
+    box.appendChild(addonRow({
+      title: pack.title,
+      subtitle: `v${pack.versionNumber} · ${pack.loader} · Minecraft ${pack.mcVersion}`,
+      meta: `Slug: ${pack.slug}`,
+      btnLabel: 'Remove',
+      danger: true,
+      onClick: async () => {
+        if (!confirm(`Remove "${pack.title}"?\n\nThe server will restart as a plain ${s.server_type} server. World files are kept.`)) return;
+        const r = await api(`/servers/${selectedServerId}/modpack/remove`, { method: 'POST' });
+        if (!r.success) { alert(r.error || 'Failed to remove modpack'); return; }
+        await loadServers();
+        loadModpackTab();
+        loadPluginsTab();
+      },
+    }));
+  }
+
+  async function searchModpacksUI() {
+    const q = $('#modpack-search-input').value.trim();
+    if (!q) return;
+    const out = $('#modpack-search-results');
+    out.innerHTML = '<div class="empty-state-sm">Searching Modrinth...</div>';
+
+    try {
+      const d = await api(`/modpacks/search?q=${encodeURIComponent(q)}`);
+      if (!d.success) { out.innerHTML = `<div class="empty-state-sm">${escHtml(d.error || 'Search failed')}</div>`; return; }
+      if (!d.results.length) { out.innerHTML = '<div class="empty-state-sm">No modpacks found. Try different keywords.</div>'; return; }
+
+      out.innerHTML = '';
+      for (const p of d.results) {
+        out.appendChild(addonRow({
+          icon: p.icon,
+          title: p.title,
+          subtitle: p.description,
+          meta: `${p.downloads.toLocaleString()} downloads · MC ${p.latestMcVersion || '?'}`,
+          btnLabel: 'Install',
+          onClick: async (btn) => {
+            const msg = `Install "${p.title}"?\n\n` +
+              `• The server will be converted to run this pack and restarted\n` +
+              `• First boot downloads all mods — it can take several minutes\n` +
+              `• RAM below 4G is raised to 4G automatically\n` +
+              `• World files are kept`;
+            if (!confirm(msg)) return;
+
+            btn.textContent = '⟳ Installing...';
+            const r = await api(`/servers/${selectedServerId}/modpack/install`, {
+              method: 'POST',
+              body: JSON.stringify({ slug: p.slug }),
+            });
+            if (r.success) {
+              btn.textContent = '✓ Installed';
+              await loadServers();
+              loadModpackTab();
+            } else {
+              alert(r.error || 'Install failed');
+            }
+          },
+        }));
+      }
+    } catch (err) {
+      out.innerHTML = `<div class="empty-state-sm">Error: ${escHtml(err.message)}</div>`;
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -976,6 +1188,15 @@
   $('#files-editor-content').addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); }
   });
+
+  // Plugins / Mods
+  $('#btn-plugins-refresh').addEventListener('click', loadPluginsTab);
+  $('#plugins-search-btn').addEventListener('click', searchPluginsUI);
+  $('#plugins-search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchPluginsUI(); });
+
+  // Modpack
+  $('#modpack-search-btn').addEventListener('click', searchModpacksUI);
+  $('#modpack-search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchModpacksUI(); });
 
   // Players
   $('#btn-refresh-players').addEventListener('click', loadPlayers);

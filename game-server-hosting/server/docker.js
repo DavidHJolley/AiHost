@@ -60,19 +60,29 @@ function serverVolumePath(serverId) {
   return dir;
 }
 
-function buildEnvVars(game, ram, extra = {}, serverType = 'vanilla') {
+function buildEnvVars(game, ram, extra = {}, serverType = 'vanilla', modpack = null) {
   const env = { ...extra };
 
   if (game === 'minecraft') {
     env.EULA = 'TRUE';
     env.MEMORY = ram;
-    env.TYPE = (serverType || 'vanilla').toUpperCase();
-    env.VERSION = 'LATEST';
     env.ONLINE_MODE = 'FALSE';
     env.OVERRIDE_SERVER_PROPERTIES = 'false';
     env.ENABLE_RCON = 'true';
     env.RCON_PASSWORD = RCON_PASSWORD;
     if (extra.SERVER_PORT) env.SERVER_PORT = extra.SERVER_PORT;
+
+    if (modpack && modpack.slug) {
+      // itzg/minecraft-server installs the Modrinth pack (and its mod loader)
+      // automatically. The pack pins the MC version, so VERSION must NOT be set.
+      env.TYPE = 'MODRINTH';
+      env.MODRINTH_MODPACK = modpack.slug;
+      if (modpack.versionId) env.MODRINTH_VERSION = modpack.versionId;
+      env.MODRINTH_DEFAULT_VERSION_TYPE = 'release';
+    } else {
+      env.TYPE = (serverType || 'vanilla').toUpperCase();
+      env.VERSION = 'LATEST';
+    }
   }
 
   return Object.entries(env).map(([k, v]) => `${k}=${v}`);
@@ -114,10 +124,15 @@ async function createContainer(server, properties = {}) {
 
   const extra = { SERVER_PORT: String(port), ...properties };
 
+  let modpack = null;
+  if (server.modpack) {
+    try { modpack = JSON.parse(server.modpack); } catch {}
+  }
+
   const container = await docker.createContainer({
     name: containerName(id),
     Image: image,
-    Env: buildEnvVars(game, ram, extra, server_type),
+    Env: buildEnvVars(game, ram, extra, server_type, modpack),
     HostConfig: {
       Binds: [`${volumePath}:/data`],
       NetworkMode: 'host',

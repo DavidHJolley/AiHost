@@ -46,6 +46,13 @@ try {
   // Column already exists
 }
 
+// Migration: add modpack (JSON blob: {slug, title, versionId, versionNumber, loader, mcVersion})
+try {
+  db.exec(`ALTER TABLE servers ADD COLUMN modpack TEXT`);
+} catch {
+  // Column already exists
+}
+
 // ─── Statements ──────────────────────────────────────────────────────────────
 
 const stmts = {
@@ -73,6 +80,18 @@ const stmts = {
   updateServerType: db.prepare(`
     UPDATE servers
     SET server_type = @server_type, updated_at = datetime('now')
+    WHERE id = @id
+  `),
+
+  updateModpack: db.prepare(`
+    UPDATE servers
+    SET modpack = @modpack, updated_at = datetime('now')
+    WHERE id = @id
+  `),
+
+  updateRam: db.prepare(`
+    UPDATE servers
+    SET ram = @ram, updated_at = datetime('now')
     WHERE id = @id
   `),
 
@@ -121,6 +140,27 @@ function updateServerType(id, serverType) {
   return stmts.findById.get(id);
 }
 
+/**
+ * Set or clear the installed modpack. Pass an object to set, null to clear.
+ */
+function setModpack(id, modpack) {
+  stmts.updateModpack.run({ id, modpack: modpack ? JSON.stringify(modpack) : null });
+  return stmts.findById.get(id);
+}
+
+function updateServerRam(id, ram) {
+  stmts.updateRam.run({ id, ram });
+  return stmts.findById.get(id);
+}
+
+/**
+ * Parse the modpack JSON column off a server row. Returns null if none.
+ */
+function getModpack(server) {
+  if (!server || !server.modpack) return null;
+  try { return JSON.parse(server.modpack); } catch { return null; }
+}
+
 function deleteServer(id) {
   stmts.delete.run(id);
 }
@@ -131,5 +171,8 @@ module.exports = {
   getServerById,
   updateServerStatus,
   updateServerType,
+  setModpack,
+  getModpack,
+  updateServerRam,
   deleteServer,
 };

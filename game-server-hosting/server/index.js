@@ -311,13 +311,44 @@ app.post('/servers/:id/files/delete', asyncHandler(async (req, res) => {
 // ─── Plugin management ────────────────────────────────────────────────────────
 
 const plugins = require('./plugins');
+const modpacks = require('./modpacks');
+
+// Panel search — plugins or mods depending on the server's setup
+app.get('/plugins/search', asyncHandler(async (req, res) => {
+  const query = (req.query.q || '').trim();
+  if (!query) return fail(res, 'q is required');
+
+  // Optional serverId scopes mod searches to that server's loader/MC version
+  let loader; let mcVersion; let kind = 'plugin';
+  if (req.query.serverId) {
+    const server = db.getServerById(req.query.serverId);
+    const pack = server ? db.getModpack(server) : null;
+    if (pack) {
+      kind = 'mod';
+      loader = pack.loader;
+      mcVersion = pack.mcVersion;
+    }
+  }
+
+  try {
+    const results = kind === 'mod'
+      ? await plugins.searchMods(query, { limit: 10, loader, mcVersion })
+      : await plugins.searchPlugins(query, { limit: 10 });
+    ok(res, { results, kind });
+  } catch (err) {
+    fail(res, `Search failed: ${err.message}`, 500);
+  }
+}));
 
 app.get('/servers/:id/plugins', asyncHandler(async (req, res) => {
   const server = db.getServerById(req.params.id);
   if (!server) return fail(res, 'Server not found', 404);
 
-  const installed = plugins.listInstalledPlugins(SERVERS_PATH, server.id);
-  ok(res, { plugins: installed });
+  const pack = db.getModpack(server);
+  const installed = pack
+    ? plugins.listInstalledMods(SERVERS_PATH, server.id)
+    : plugins.listInstalledPlugins(SERVERS_PATH, server.id);
+  ok(res, { plugins: installed, kind: pack ? 'mod' : 'plugin', modpack: pack });
 }));
 
 app.post('/servers/:id/plugins/install', asyncHandler(async (req, res) => {
@@ -328,8 +359,72 @@ app.post('/servers/:id/plugins/install', asyncHandler(async (req, res) => {
   if (!slug && !query) return fail(res, 'slug or query is required');
 
   try {
-    const result = await plugins.installPlugin(SERVERS_PATH, server.id, { slug, query });
-    ok(res, { plugin: result });
+    const pack = db.getModpack(server);
+    const result = pack
+      ? await plugins.installMod(SERVERS_PATH, server.id, {
+          slug, query, loader: pack.loader, mcVersion: pack.mcVersion,
+        })
+      : await plugins.installPlugin(SERVERS_PATH, server.id, { slug, query });
+    ok(res, { plugin: result, kind: pack ? 'mod' : 'plugin' });
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+app.post('/servers/:id/plugins/remove', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { filename } = req.body;
+  if (!filename) return fail(res, 'filename is required');
+
+  try {
+    const pack = db.getModpack(server);
+    const result = pack
+      ? plugins.removeMod(SERVERS_PATH, server.id, filename)
+      : plugins.removePlugin(SERVERS_PATH, server.id, filename);
+    ok(res, { ...result });
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+// ─── Modpack management ───────────────────────────────────────────────────────
+
+app.get('/modpacks/search', asyncHandler(async (req, res) => {
+  const query = (req.query.q || '').trim();
+  if (!query) return fail(res, 'q is required');
+
+  try {
+    const results = await modpacks.searchModpacks(query, { limit: 10 });
+    ok(res, { results });
+  } catch (err) {
+    fail(res, `Search failed: ${err.message}`, 500);
+  }
+}));
+
+app.post('/servers/:id/modpack/install', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  const { slug, query } = req.body;
+  if (!slug && !query) return fail(res, 'slug or query is required');
+
+  try {
+    const result = await modpacks.installModpack({ db, docker }, server, { slug, query });
+    ok(res, { modpack: result.modpack, ramBumped: result.ramBumped, server: result.server });
+  } catch (err) {
+    fail(res, err.message, 500);
+  }
+}));
+
+app.post('/servers/:id/modpack/remove', asyncHandler(async (req, res) => {
+  const server = db.getServerById(req.params.id);
+  if (!server) return fail(res, 'Server not found', 404);
+
+  try {
+    const result = await modpacks.removeModpack({ db, docker }, server);
+    ok(res, { removed: result.removed, server: result.server });
   } catch (err) {
     fail(res, err.message, 500);
   }

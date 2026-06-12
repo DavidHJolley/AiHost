@@ -99,8 +99,23 @@ AVAILABLE ACTIONS:
 12. list_plugins — Show installed plugins on a server
     {"action":"list_plugins","name":"<server>"}
 
-13. remove_plugin — Remove an installed plugin
+13. remove_plugin — Remove an installed plugin (or mod, on modpack servers)
     {"action":"remove_plugin","name":"<server>","pluginName":"<filename or partial name>"}
+
+14. search_modpacks — Search Modrinth for modpacks (browse without installing)
+    {"action":"search_modpacks","query":"<search terms>"}
+
+15. install_modpack — Install a modpack from Modrinth onto a server
+    {"action":"install_modpack","name":"<server>","query":"<search terms>"}
+    OR by exact slug:
+    {"action":"install_modpack","name":"<server>","slug":"<modrinth-slug>"}
+
+16. remove_modpack — Remove the installed modpack (reverts to a plain server, world is kept)
+    {"action":"remove_modpack","name":"<server>"}
+
+17. search_mods — Search Modrinth for mods (for modpack/modded servers)
+    {"action":"search_mods","query":"<search terms>","name":"<server, optional>"}
+    Include "name" when a server is known so results match its loader and MC version.
 
 PLUGIN RULES:
 - When the user asks for a feature/functionality (e.g. "I want teleportation"), translate that into a plugin search query.
@@ -108,6 +123,15 @@ PLUGIN RULES:
 - Use "install_plugin" with a "query" when the user describes what they want. Use "slug" when they name a specific plugin.
 - If the user just wants to browse, use "search_plugins".
 - Vanilla servers will be auto-upgraded to Paper for plugin support — no need to warn about this.
+
+MODPACK RULES:
+- A modpack REPLACES the server software (the system installs the pack's mod loader automatically). Use "install_modpack" when the user names a pack (e.g. "Cobblemon", "Better MC", "Prominence") or asks for "a modpack".
+- Packs come from Modrinth. CurseForge-exclusive packs (e.g. "All the Mods", "RLCraft") are NOT available — if a search finds nothing, say so and suggest searching for a similar pack instead.
+- Do NOT guess slugs — when the user names a pack, pass it as "query" and the system picks the top match. Only use "slug" if the user gives an exact Modrinth slug/URL. Use "search_modpacks" to show options first when they're browsing.
+- Installing a modpack restarts the server and the first boot takes several minutes. RAM below 4G is raised to 4G automatically — no need to warn, just mention it happened if asked.
+- On a server that HAS a modpack, "install_plugin" installs MODS (matched to the pack's loader and MC version) — use it exactly the same way. Use "search_mods" for browsing mods.
+- If the user wants a modpack on a brand-new server, use multi_step: create_server (any type, 4G+ RAM) then install_modpack.
+- Use "remove_modpack" when they want to go back to a normal/vanilla server.
 
 Multi-step plan format (for complex requests needing sequential actions):
 {"action":"multi_step","steps":[{"action":"..."},{"action":"..."}]}
@@ -183,6 +207,24 @@ User: "Remove essentials from my server"
 User: "I want land claims and teleporting"
 {"action":"multi_step","steps":[{"action":"install_plugin","name":"minecraft-cace","query":"griefprevention land claims"},{"action":"install_plugin","name":"minecraft-cace","query":"essentials teleport homes"}]}
 
+User: "Install the Cobblemon modpack on my server"
+{"action":"install_modpack","name":"minecraft-cace","query":"Cobblemon"}
+
+User: "Show me some tech modpacks"
+{"action":"search_modpacks","query":"tech modpack"}
+
+User: "Set up a server running the Prominence modpack"
+{"action":"multi_step","steps":[{"action":"create_server","name":"prominence","game":"minecraft","ram":"6G","server_type":"vanilla","properties":{}},{"action":"install_modpack","name":"prominence","query":"Prominence"}]}
+
+User: "Add a minimap mod" (server has a modpack installed)
+{"action":"install_plugin","name":"minecraft-cace","query":"minimap"}
+
+User: "What mods are there for storage?" (server has a modpack installed)
+{"action":"search_mods","query":"storage","name":"minecraft-cace"}
+
+User: "Get rid of the modpack, I want vanilla back"
+{"action":"remove_modpack","name":"minecraft-cace"}
+
 User: "Install common plugins" or "Install the most popular plugins"
 {"action":"multi_step","steps":[{"action":"install_plugin","name":"minecraft-cace","slug":"essentialsx"},{"action":"install_plugin","name":"minecraft-cace","slug":"luckperms"},{"action":"install_plugin","name":"minecraft-cace","slug":"worldedit"}]}
 
@@ -242,16 +284,29 @@ async function buildServerContext(db, docker, serversPath) {
       }
     } catch {}
 
-    const type = server.server_type || 'vanilla';
+    let pack = null;
+    try { pack = server.modpack ? JSON.parse(server.modpack) : null; } catch {}
+
+    const type = pack ? `modpack: ${pack.title}` : (server.server_type || 'vanilla');
     lines.push(`- "${server.name}" (${server.game}, ${type}) — ${status} — port ${server.port}, RAM ${server.ram}`);
+    if (pack) {
+      lines.push(`  Modpack: ${pack.title} v${pack.versionNumber} (${pack.loader}, MC ${pack.mcVersion}) — plugin requests on this server install MODS`);
+    }
     if (configSnippet) lines.push(configSnippet);
 
-    // Include installed plugins
+    // Include installed plugins/mods
     try {
       const pluginsMod = require('./plugins');
-      const installed = pluginsMod.listInstalledPlugins(serversPath, server.id);
-      if (installed.length > 0) {
-        lines.push(`  Plugins: ${installed.map((p) => p.filename).join(', ')}`);
+      if (pack) {
+        const mods = pluginsMod.listInstalledMods(serversPath, server.id);
+        if (mods.length > 0) {
+          lines.push(`  Extra mods: ${mods.map((p) => p.filename).join(', ')}`);
+        }
+      } else {
+        const installed = pluginsMod.listInstalledPlugins(serversPath, server.id);
+        if (installed.length > 0) {
+          lines.push(`  Plugins: ${installed.map((p) => p.filename).join(', ')}`);
+        }
       }
     } catch {}
   }

@@ -16,6 +16,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const templates = require('./templates');
 const plugins = require('./plugins');
+const modpacks = require('./modpacks');
 
 // ─── Action schemas ────────────────────────────────────────────────────────────
 
@@ -73,6 +74,22 @@ const ACTION_SCHEMAS = {
     optional: [],
   },
   list_plugins: {
+    required: ['name'],
+    optional: [],
+  },
+  search_mods: {
+    required: ['query'],
+    optional: ['name'],
+  },
+  search_modpacks: {
+    required: ['query'],
+    optional: [],
+  },
+  install_modpack: {
+    required: ['name'],
+    optional: ['query', 'slug'],
+  },
+  remove_modpack: {
     required: ['name'],
     optional: [],
   },
@@ -485,6 +502,40 @@ const executors = {
       return { success: false, reply: `No server found with name "${action.name}".` };
     }
 
+    // Modpack servers take mods (Fabric/Forge), not Bukkit plugins — route there.
+    const pack = ctx.db.getModpack(server);
+    if (pack) {
+      try {
+        const modInfo = await plugins.installMod(ctx.serversPath, server.id, {
+          slug: action.slug,
+          query: action.query,
+          loader: pack.loader,
+          mcVersion: pack.mcVersion,
+        });
+
+        if (modInfo.alreadyInstalled) {
+          return {
+            success: true,
+            reply: `**${modInfo.title}** v${modInfo.version} is already installed on **${server.name}**.`,
+            server,
+            plugin: modInfo,
+          };
+        }
+
+        const restartHint = server.status === 'running'
+          ? `\n\n**Restart required** to load the mod. Say "restart ${server.name}" to apply.`
+          : '';
+        return {
+          success: true,
+          reply: `**${modInfo.title}** v${modInfo.version} (${pack.loader} mod) installed on **${server.name}**.${restartHint}`,
+          server,
+          plugin: modInfo,
+        };
+      } catch (err) {
+        return { success: false, reply: `Mod install failed: ${err.message}`, server };
+      }
+    }
+
     const PLUGIN_LOADERS = ['paper', 'spigot', 'purpur'];
     const needsUpgrade = !PLUGIN_LOADERS.includes(server.server_type);
     let upgraded = false;
@@ -576,19 +627,28 @@ const executors = {
       return { success: false, reply: `No server found with name "${action.name}".` };
     }
 
+    const pack = ctx.db.getModpack(server);
+    const folderLabel = pack ? 'Mod' : 'Plugin';
+
     try {
       // Try exact match first, then fuzzy match on filename
-      const installed = plugins.listInstalledPlugins(ctx.serversPath, server.id);
+      const installed = pack
+        ? plugins.listInstalledMods(ctx.serversPath, server.id)
+        : plugins.listInstalledPlugins(ctx.serversPath, server.id);
       const target = action.pluginName.toLowerCase();
       const match = installed.find((p) => p.filename.toLowerCase() === target)
         || installed.find((p) => p.filename.toLowerCase().includes(target));
 
       if (!match) {
         const names = installed.map((p) => p.filename).join(', ') || 'none';
-        return { success: false, reply: `Plugin "${action.pluginName}" not found. Installed: ${names}`, server };
+        return { success: false, reply: `${folderLabel} "${action.pluginName}" not found. Installed: ${names}`, server };
       }
 
-      plugins.removePlugin(ctx.serversPath, server.id, match.filename);
+      if (pack) {
+        plugins.removeMod(ctx.serversPath, server.id, match.filename);
+      } else {
+        plugins.removePlugin(ctx.serversPath, server.id, match.filename);
+      }
 
       const restartHint = server.status === 'running'
         ? ` Restart the server to unload it.`
@@ -600,7 +660,7 @@ const executors = {
         server,
       };
     } catch (err) {
-      return { success: false, reply: `Failed to remove plugin: ${err.message}`, server };
+      return { success: false, reply: `Failed to remove ${folderLabel.toLowerCase()}: ${err.message}`, server };
     }
   },
 
@@ -610,12 +670,16 @@ const executors = {
       return { success: false, reply: `No server found with name "${action.name}".` };
     }
 
-    const installed = plugins.listInstalledPlugins(ctx.serversPath, server.id);
+    const pack = ctx.db.getModpack(server);
+    const installed = pack
+      ? plugins.listInstalledMods(ctx.serversPath, server.id)
+      : plugins.listInstalledPlugins(ctx.serversPath, server.id);
+    const label = pack ? 'mods' : 'plugins';
 
     if (installed.length === 0) {
       return {
         success: true,
-        reply: `No plugins installed on **${server.name}**. Say "install <plugin name>" to add one.`,
+        reply: `No ${label} installed on **${server.name}**. Say "install <name>" to add one.`,
         server,
       };
     }
@@ -625,12 +689,110 @@ const executors = {
       return `• **${p.filename}** (${sizeMB} MB)`;
     });
 
+    const packLine = pack ? `Modpack: **${pack.title}** v${pack.versionNumber} (${pack.loader}, MC ${pack.mcVersion})\n\n` : '';
+
     return {
       success: true,
-      reply: `**Plugins on ${server.name}:**\n${lines.join('\n')}`,
+      reply: `${packLine}**${pack ? 'Mods' : 'Plugins'} on ${server.name}:**\n${lines.join('\n')}`,
       server,
       plugins: installed,
     };
+  },
+
+  async search_mods(action, ctx) {
+    // If a server is named and runs a modpack, scope results to its loader/version
+    let loader; let mcVersion;
+    if (action.name) {
+      const server = findServerByName(ctx.db, action.name);
+      const pack = server ? ctx.db.getModpack(server) : null;
+      if (pack) { loader = pack.loader; mcVersion = pack.mcVersion; }
+    }
+
+    try {
+      const results = await plugins.searchMods(action.query, { limit: 5, loader, mcVersion });
+      if (results.length === 0) {
+        return { success: true, reply: `No mods found for "${action.query}". Try different keywords.` };
+      }
+      const lines = results.map((p, i) =>
+        `${i + 1}. **${p.title}** (\`${p.slug}\`) — ${p.description}\n   ${p.downloads.toLocaleString()} downloads`
+      );
+      return {
+        success: true,
+        reply: `**Mods matching "${action.query}":**\n\n${lines.join('\n\n')}\n\nSay "install <name> on <server>" to install one.`,
+        results,
+      };
+    } catch (err) {
+      return { success: false, reply: `Mod search failed: ${err.message}` };
+    }
+  },
+
+  async search_modpacks(action, _ctx) {
+    try {
+      const results = await modpacks.searchModpacks(action.query, { limit: 5 });
+      if (results.length === 0) {
+        return { success: true, reply: `No modpacks found for "${action.query}". Try different keywords.` };
+      }
+      const lines = results.map((p, i) =>
+        `${i + 1}. **${p.title}** (\`${p.slug}\`) — ${p.description}\n   ${p.downloads.toLocaleString()} downloads · MC ${p.latestMcVersion || '?'}`
+      );
+      return {
+        success: true,
+        reply: `**Modpacks matching "${action.query}":**\n\n${lines.join('\n\n')}\n\nSay "install <pack> on <server>" to set one up.`,
+        results,
+      };
+    } catch (err) {
+      return { success: false, reply: `Modpack search failed: ${err.message}` };
+    }
+  },
+
+  async install_modpack(action, ctx) {
+    const server = findServerByName(ctx.db, action.name);
+    if (!server) {
+      return { success: false, reply: `No server found with name "${action.name}".` };
+    }
+
+    try {
+      const { modpack, ramBumped, server: updated } = await modpacks.installModpack(
+        { db: ctx.db, docker: ctx.docker },
+        server,
+        { slug: action.slug, query: action.query },
+      );
+
+      const parts = [
+        `**${modpack.title}** v${modpack.versionNumber} is installing on **${server.name}**.`,
+        ``,
+        `• Loader: ${modpack.loader} · Minecraft ${modpack.mcVersion}`,
+        `• The server is restarting now — first boot downloads all the mods, so give it a few minutes.`,
+      ];
+      if (ramBumped) {
+        parts.push(`• RAM was raised to 4G (modpacks need more memory).`);
+      }
+
+      return { success: true, reply: parts.join('\n'), server: updated, modpack };
+    } catch (err) {
+      return { success: false, reply: `Modpack install failed: ${err.message}`, server };
+    }
+  },
+
+  async remove_modpack(action, ctx) {
+    const server = findServerByName(ctx.db, action.name);
+    if (!server) {
+      return { success: false, reply: `No server found with name "${action.name}".` };
+    }
+
+    try {
+      const { removed, server: updated } = await modpacks.removeModpack(
+        { db: ctx.db, docker: ctx.docker },
+        server,
+      );
+      return {
+        success: true,
+        reply: `Removed **${removed.title}** from **${server.name}**. The server is restarting as a ${updated.server_type} server. World data was kept.`,
+        server: updated,
+      };
+    } catch (err) {
+      return { success: false, reply: `Modpack removal failed: ${err.message}`, server };
+    }
   },
 };
 
