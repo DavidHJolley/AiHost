@@ -1,6 +1,6 @@
 /**
  * ai.js
- * Converts natural language into structured JSON actions using the Groq API.
+ * Converts natural language into structured JSON actions using the Anthropic API.
  *
  * Key capabilities:
  *   - Server awareness: AI knows what servers exist, their status, and configs
@@ -12,11 +12,10 @@
  * Execution is handled by actions.js.
  */
 
-const axios = require('axios');
+const Anthropic = require('@anthropic-ai/sdk');
 const templates = require('./templates');
 
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.1-8b-instant';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 // ─── System prompt builder ────────────────────────────────────────────────────
 
@@ -312,57 +311,46 @@ function parseAIResponse(text) {
 // ─── Parse message ────────────────────────────────────────────────────────────
 
 async function parseMessage(userMessage, history = [], serverContext = '') {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
     return {
       action: 'error',
-      message: 'GROQ_API_KEY is not set. Please add it to your .env file.',
+      message: 'ANTHROPIC_API_KEY is not set. Please add it to your .env file.',
     };
   }
 
+  const client = new Anthropic({ apiKey });
   const systemPrompt = buildSystemPrompt(serverContext);
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...history,
-    { role: 'user', content: userMessage },
-  ];
+  const callAnthropic = async (msgs, attempt = 1) => {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: msgs,
+    });
 
-  const callGroq = async (msgs, attempt = 1) => {
-    const response = await axios.post(
-      GROQ_API_URL,
-      {
-        model: MODEL,
-        max_tokens: 1024,
-        temperature: 0.05,
-        response_format: { type: 'json_object' },
-        messages: msgs,
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 20000,
-      }
-    );
-
-    const text = response.data.choices[0].message.content.trim();
+    const text = response.content[0].text.trim();
     const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     const parsed = parseAIResponse(cleaned);
 
     if (!parsed && attempt < 2) {
       console.log('[AI] Non-JSON response, retrying...');
       const retry = [...msgs, { role: 'assistant', content: text }, { role: 'user', content: 'Respond ONLY with a valid JSON object. No prose.' }];
-      return callGroq(retry, attempt + 1);
+      return callAnthropic(retry, attempt + 1);
     }
 
     return parsed;
   };
 
+  const messages = [
+    ...history,
+    { role: 'user', content: userMessage },
+  ];
+
   try {
-    const parsed = await callGroq(messages);
+    const parsed = await callAnthropic(messages);
 
     if (!parsed) {
       return {
@@ -373,15 +361,9 @@ async function parseMessage(userMessage, history = [], serverContext = '') {
 
     return parsed;
   } catch (err) {
-    if (err.response) {
-      return {
-        action: 'error',
-        message: `Groq API error ${err.response.status}: ${JSON.stringify(err.response.data)}`,
-      };
-    }
     return {
       action: 'error',
-      message: `Network error calling Groq API: ${err.message}`,
+      message: `Anthropic API error: ${err.message}`,
     };
   }
 }
@@ -393,8 +375,10 @@ async function parseMessage(userMessage, history = [], serverContext = '') {
  * send the logs to the AI for deeper analysis.
  */
 async function analyzeLogs(serverName, logs, config, serverContext) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return 'Could not analyze logs — API key not set.';
+
+  const client = new Anthropic({ apiKey });
 
   const configSummary = config
     ? Object.entries(config).map(([k, v]) => `${k}=${v}`).join('\n')
@@ -418,23 +402,12 @@ Respond with a clear, concise diagnosis. If you see issues, explain:
 If the logs look healthy, say so. Be specific and actionable.`;
 
   try {
-    const response = await axios.post(
-      GROQ_API_URL,
-      {
-        model: MODEL,
-        max_tokens: 512,
-        temperature: 0.2,
-        messages: [{ role: 'user', content: prompt }],
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 20000,
-      }
-    );
-    return response.data.choices[0].message.content.trim();
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 512,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    return response.content[0].text.trim();
   } catch {
     return 'Could not complete log analysis.';
   }

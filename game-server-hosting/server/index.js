@@ -581,5 +581,5 @@ wss.on('connection', (ws) => {
 httpServer.listen(PORT, () => {
   console.log(`Game Server Hosting running at http://localhost:${PORT}`);
   console.log(`  WebSocket: ws://localhost:${PORT}/ws`);
-  console.log(`  AI model: ${process.env.GROQ_API_KEY ? 'Groq API key loaded' : 'GROQ_API_KEY not set'}`);
+  console.log(`  AI model: ${process.env.ANTHROPIC_API_KEY ? 'Anthropic API key loaded' : 'ANTHROPIC_API_KEY not set'}`);
 });
