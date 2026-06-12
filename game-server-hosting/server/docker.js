@@ -31,6 +31,27 @@ const GAME_IMAGES = {
   minecraft: 'itzg/minecraft-server',
 };
 
+/**
+ * Pick the image tag (= bundled Java version) for a Minecraft version.
+ * The `latest` tag ships the newest JVM (Java 25 as of mid-2026), which breaks
+ * older modded servers — e.g. 1.20.1 Fabric's mixin can't read Java 25 class
+ * files and dies with a bogus "ClassNotFoundException: java.util.Optional".
+ *
+ *   ≤1.16.5          → java8   (legacy Forge/Fabric era)
+ *   1.17 – 1.20.4    → java17
+ *   1.20.5+ / 1.21+  → java21
+ *   unknown          → latest
+ */
+function minecraftImageTag(mcVersion) {
+  const m = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(mcVersion || '').trim());
+  if (!m) return 'latest';
+  const minor = parseInt(m[2], 10);
+  const patch = parseInt(m[3] || '0', 10);
+  if (minor <= 16) return 'java8-multiarch';
+  if (minor < 20 || (minor === 20 && patch <= 4)) return 'java17';
+  return 'java21';
+}
+
 const GAME_PORTS = {
   minecraft: '25565/tcp',
 };
@@ -113,9 +134,20 @@ async function ensureImage(image) {
 
 async function createContainer(server, properties = {}) {
   const { id, game, ram, port, server_type } = server;
-  const image = GAME_IMAGES[game];
+  let image = GAME_IMAGES[game];
 
   if (!image) throw new Error(`Unsupported game: ${game}`);
+
+  let modpack = null;
+  if (server.modpack) {
+    try { modpack = JSON.parse(server.modpack); } catch {}
+  }
+
+  // Modpacks pin an MC version — match the container's Java to it.
+  // Plain vanilla/paper servers run VERSION=LATEST, so `latest` is correct.
+  if (game === 'minecraft' && modpack && modpack.mcVersion) {
+    image = `${image}:${minecraftImageTag(modpack.mcVersion)}`;
+  }
 
   await ensureImage(image);
 
@@ -123,11 +155,6 @@ async function createContainer(server, properties = {}) {
   const containerPort = GAME_PORTS[game];
 
   const extra = { SERVER_PORT: String(port), ...properties };
-
-  let modpack = null;
-  if (server.modpack) {
-    try { modpack = JSON.parse(server.modpack); } catch {}
-  }
 
   const container = await docker.createContainer({
     name: containerName(id),
@@ -311,6 +338,7 @@ async function streamContainerLogs(containerId, onData) {
 }
 
 module.exports = {
+  minecraftImageTag,
   createContainer,
   startContainer,
   stopContainer,
