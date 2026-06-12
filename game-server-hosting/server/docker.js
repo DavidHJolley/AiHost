@@ -12,8 +12,18 @@ const { PassThrough } = require('stream');
 const path = require('path');
 const fs = require('fs');
 
-// Connect to Docker via Unix socket (works inside Docker when socket is mounted)
-const docker = new Dockerode({ socketPath: '/var/run/docker.sock' });
+// Connect to Docker. Inside the docker-compose container (Linux) the socket is
+// mounted at /var/run/docker.sock. On a Windows host (e.g. `npm run dev` with
+// Docker Desktop) the engine is exposed as a named pipe instead. Honour an
+// explicit DOCKER_HOST if the user sets one, otherwise pick by platform.
+const docker = process.env.DOCKER_HOST
+  ? new Dockerode()
+  : new Dockerode({
+      socketPath:
+        process.platform === 'win32'
+          ? '//./pipe/docker_engine'
+          : '/var/run/docker.sock',
+    });
 
 // ─── Game image registry ──────────────────────────────────────────────────────
 
